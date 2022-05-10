@@ -1,3 +1,4 @@
+use super::socket::SocketType;
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -20,12 +21,6 @@ pub(crate) enum ControlPacketType {
     Ack2,
     MsgDropRequest(DropRequestInfo),
     UserDefined,
-}
-
-#[derive(Debug)]
-pub(crate) enum SocketType {
-    Stream = 0,
-    Datagram = 1,
 }
 
 #[derive(Debug)]

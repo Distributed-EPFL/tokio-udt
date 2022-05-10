@@ -4,6 +4,7 @@ mod data_packet;
 mod multiplexer;
 mod packet;
 mod socket;
+mod udt;
 
 #[cfg(test)]
 mod tests {

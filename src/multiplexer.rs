@@ -1,10 +1,12 @@
-use super::configuration::UdtConfiguration;
 use super::socket::UdtSocket;
 use std::collections::VecDeque;
 
+pub type MultiplexerId = usize;
+
 #[derive(Debug)]
-struct UDTMultiplexer<'a> {
-    configuration: UdtConfiguration,
+pub(crate) struct UDTMultiplexer<'a> {
+    id: usize,
+    port: u16,
 
     snd_queue: VecDeque<&'a UdtSocket>,
     rcv_queue: VecDeque<&'a UdtSocket>,
