@@ -1,4 +1,4 @@
-use super::socket::SocketType;
+use super::socket::{SocketId, SocketType};
 use std::net::IpAddr;
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ pub(crate) struct HandShakeInfo {
     pub max_packet_size: u32,
     pub max_window_size: u32,
     pub connection_type: i32, // regular or rendezvous
-    pub socket_id: u32,
+    pub socket_id: SocketId,
     pub syn_cookie: u32,
     pub ip_address: IpAddr,
 }

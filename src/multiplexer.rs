@@ -1,13 +1,15 @@
 use super::socket::UdtSocket;
+use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 pub type MultiplexerId = usize;
 
 #[derive(Debug)]
-pub(crate) struct UDTMultiplexer<'a> {
-    id: usize,
-    port: u16,
+pub(crate) struct UdtMultiplexer {
+    pub id: MultiplexerId,
+    pub port: u16,
 
-    snd_queue: VecDeque<&'a UdtSocket>,
-    rcv_queue: VecDeque<&'a UdtSocket>,
+    pub snd_queue: VecDeque<Rc<RefCell<UdtSocket>>>,
+    pub rcv_queue: VecDeque<Rc<RefCell<UdtSocket>>>,
 }

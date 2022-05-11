@@ -17,10 +17,10 @@ pub(crate) struct UDTDataPacketHeader {
 
 #[derive(Debug)]
 pub(crate) enum PacketPosition {
-    FirstPacket,
-    LastPacket,
-    OnlyPacket,
-    MiddlePacket,
+    First,
+    Last,
+    Only,
+    Middle,
 }
 
 impl TryFrom<u8> for PacketPosition {
@@ -28,10 +28,10 @@ impl TryFrom<u8> for PacketPosition {
 
     fn try_from(raw_position: u8) -> Result<Self, Self::Error> {
         match raw_position {
-            0b10 => Ok(PacketPosition::FirstPacket),
-            0b01 => Ok(PacketPosition::LastPacket),
-            0b11 => Ok(PacketPosition::OnlyPacket),
-            0b00 => Ok(PacketPosition::MiddlePacket),
+            0b10 => Ok(PacketPosition::First),
+            0b01 => Ok(PacketPosition::Last),
+            0b11 => Ok(PacketPosition::Only),
+            0b00 => Ok(PacketPosition::Middle),
             _ => Err("invalid packet position"),
         }
     }

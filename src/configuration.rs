@@ -1,14 +1,14 @@
-const DEFAULT_MSS: u16 = 1500;
+const DEFAULT_MSS: u32 = 1500;
 const DEFAULT_UDT_BUF_SIZE: u32 = 8192;
 
 #[derive(Debug)]
 pub(crate) struct UdtConfiguration {
-    mss: u16,
+    pub mss: u32,
     syn_sending: bool,
     syn_recving: bool,
-    flight_flag_size: u32,
-    snd_buf_size: u32,
-    rcv_buf_size: u32,
+    pub flight_flag_size: u32,
+    pub snd_buf_size: u32,
+    pub rcv_buf_size: u32,
     linger_timeout: Option<u32>,
     udp_snd_buf_size: u32,
     udp_rcv_buf_size: u32,
