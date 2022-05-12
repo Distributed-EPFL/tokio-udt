@@ -1,11 +1,11 @@
 #[derive(Debug)]
-pub(crate) struct UDTDataPacket {
-    pub header: UDTDataPacketHeader,
+pub(crate) struct UdtDataPacket {
+    pub header: UdtDataPacketHeader,
     pub data: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub(crate) struct UDTDataPacketHeader {
+pub(crate) struct UdtDataPacketHeader {
     // bit 0 = 0
     pub seq_number: u32,          // bits 1-31
     pub position: PacketPosition, // bits 32-33

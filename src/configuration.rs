@@ -12,7 +12,7 @@ pub(crate) struct UdtConfiguration {
     linger_timeout: Option<u32>,
     udp_snd_buf_size: u32,
     udp_rcv_buf_size: u32,
-    reuse_addr: bool,
+    pub reuse_addr: bool,
     // snd_timeout
     // rcv_timeout
     // socktype

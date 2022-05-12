@@ -1,15 +1,18 @@
 use crate::configuration::UdtConfiguration;
-use crate::control_packet::HandShakeInfo;
+use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::flow::UdtFlow;
 use crate::multiplexer::UdtMultiplexer;
+use crate::packet::UdtPacket;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
+use std::io::Result;
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 
-pub type SocketId = usize;
+pub type SocketId = u32;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) enum SocketType {
     Stream = 0,
     Datagram = 1,
@@ -21,16 +24,15 @@ pub(crate) struct UdtSocket {
     pub status: UdtStatus,
     socket_type: SocketType,
     listen_socket: Option<SocketId>,
-    pub self_addr: Option<SocketAddr>,
     pub peer_addr: Option<SocketAddr>,
     pub peer_socket_id: Option<SocketId>,
-    initial_seq_number: u32,
+    pub initial_seq_number: u32,
 
     pub queued_sockets: BTreeSet<SocketId>,
     pub accepted_socket: BTreeSet<SocketId>,
     pub backlog_size: usize,
-    multiplexer: Option<Rc<RefCell<UdtMultiplexer>>>,
-    configuration: UdtConfiguration,
+    pub multiplexer: Option<Rc<RefCell<UdtMultiplexer>>>,
+    pub configuration: UdtConfiguration,
     flow: UdtFlow,
     self_ip: Option<IpAddr>,
 }
@@ -42,7 +44,6 @@ impl UdtSocket {
             socket_type,
             status: UdtStatus::Init,
             initial_seq_number: rand::random(),
-            self_addr: None,
             peer_addr: None,
             peer_socket_id: None,
             listen_socket: None,
@@ -62,8 +63,9 @@ impl UdtSocket {
         self
     }
 
-    pub fn with_listen_socket(mut self, listen_socket: SocketId) -> Self {
-        self.listen_socket = Some(listen_socket);
+    pub fn with_listen_socket(mut self, listen_socket: &UdtSocket) -> Self {
+        self.listen_socket = Some(listen_socket.socket_id);
+        self.multiplexer = listen_socket.multiplexer.clone();
         self
     }
 
@@ -77,11 +79,11 @@ impl UdtSocket {
         self.status = UdtStatus::Opened;
     }
 
-    pub fn connect_on_handshake(
+    pub async fn connect_on_handshake(
         mut self,
         peer: SocketAddr,
         mut hs: HandShakeInfo,
-    ) -> Rc<RefCell<Self>> {
+    ) -> Result<Rc<RefCell<Self>>> {
         if hs.max_packet_size > self.configuration.mss {
             hs.max_packet_size = self.configuration.mss;
         } else {
@@ -102,12 +104,17 @@ impl UdtSocket {
         self.peer_addr = Some(peer);
         self.status = UdtStatus::Connected;
 
+        let packet = UdtControlPacket::new_handshake(
+            hs,
+            self.peer_socket_id.expect("peer_socket_id not defined"),
+        );
         let socket = Rc::new(RefCell::new(self));
+
         if let Some(mut mux) = socket.borrow().multiplexer.as_ref().map(|m| m.borrow_mut()) {
             mux.rcv_queue.push_back(socket.clone());
+            mux.send_to(&peer, UdtPacket::Control(packet)).await?;
         }
-
-        socket
+        Ok(socket)
     }
 
     pub fn set_multiplexer(&mut self, mux: Rc<RefCell<UdtMultiplexer>>) {
@@ -117,7 +124,33 @@ impl UdtSocket {
     pub fn set_self_ip(&mut self, ip: IpAddr) {
         self.self_ip = Some(ip);
     }
+
+    pub fn self_addr(&self) -> Option<SocketAddr> {
+        self.multiplexer
+            .as_ref()
+            .map(|m| m.borrow().get_local_addr())
+    }
 }
+
+impl Ord for UdtSocket {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.socket_id.cmp(&other.socket_id)
+    }
+}
+
+impl PartialOrd for UdtSocket {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for UdtSocket {
+    fn eq(&self, other: &Self) -> bool {
+        self.socket_id == other.socket_id
+    }
+}
+
+impl Eq for UdtSocket {}
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum UdtStatus {
