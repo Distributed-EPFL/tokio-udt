@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 rand = "*"
 tokio = { version = "1.*", features = [ "macros", "net", "io-util", "sync", "time" ] }
+sha2 = "*"

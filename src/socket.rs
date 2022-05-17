@@ -3,12 +3,14 @@ use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::flow::UdtFlow;
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::io::Result;
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
+use tokio::time::Instant;
 
 pub type SocketId = u32;
 
@@ -33,8 +35,13 @@ pub(crate) struct UdtSocket {
     pub backlog_size: usize,
     pub multiplexer: Option<Rc<RefCell<UdtMultiplexer>>>,
     pub configuration: UdtConfiguration,
+
+    snd_buffer: Vec<u8>,
+    rcv_buffer: Vec<u8>,
     flow: UdtFlow,
     self_ip: Option<IpAddr>,
+
+    start_time: Instant,
 }
 
 impl UdtSocket {
@@ -52,8 +59,11 @@ impl UdtSocket {
             backlog_size: 0,
             multiplexer: None,
             configuration: UdtConfiguration::default(),
+            snd_buffer: vec![],
+            rcv_buffer: vec![],
             flow: UdtFlow::default(),
             self_ip: None,
+            start_time: Instant::now(),
         }
     }
 
@@ -111,7 +121,9 @@ impl UdtSocket {
         let socket = Rc::new(RefCell::new(self));
 
         if let Some(mut mux) = socket.borrow().multiplexer.as_ref().map(|m| m.borrow_mut()) {
-            mux.rcv_queue.push_back(socket.clone());
+            if let Some(ref mut rcv_queue) = mux.rcv_queue {
+                rcv_queue.push_back(socket.clone());
+            }
             mux.send_to(&peer, UdtPacket::Control(packet)).await?;
         }
         Ok(socket)
@@ -129,6 +141,20 @@ impl UdtSocket {
         self.multiplexer
             .as_ref()
             .map(|m| m.borrow().get_local_addr())
+    }
+
+    pub fn send_next_packet(&mut self) -> Result<()> {
+        !unimplemented!()
+    }
+
+    pub fn listen_on_handshake(&self, addr: SocketAddr, handshake: &HandShakeInfo) {
+        let timestamp = self.start_time.elapsed().as_secs() / 60; // secret changes every one minute
+        let host = addr.ip();
+        let port = addr.port();
+        let cookie = Sha256::digest(format!("{host}:{port}:{timestamp}").as_bytes());
+        if handshake.connection_type == 1 {
+            // Regular connection, respond to handshake
+        }
     }
 }
 

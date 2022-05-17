@@ -1,8 +1,8 @@
 use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
-use super::socket::UdtSocket;
+use crate::queue::{UdtRcvQueue, UdtSndQueue};
+use crate::udt::SocketRef;
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::io::Result;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -14,12 +14,13 @@ pub type MultiplexerId = u32;
 pub(crate) struct UdtMultiplexer {
     pub id: MultiplexerId,
     pub port: u16,
-    pub channel: UdpSocket,
+    pub channel: Rc<UdpSocket>,
     pub reusable: bool,
     pub mss: u32,
 
-    pub snd_queue: VecDeque<Rc<RefCell<UdtSocket>>>,
-    pub rcv_queue: VecDeque<Rc<RefCell<UdtSocket>>>,
+    pub snd_queue: UdtSndQueue,
+    pub rcv_queue: Option<UdtRcvQueue>,
+    pub listener: Option<SocketRef>,
 }
 
 impl UdtMultiplexer {
@@ -27,22 +28,26 @@ impl UdtMultiplexer {
         id: MultiplexerId,
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
-    ) -> Result<Self> {
+    ) -> Result<Rc<RefCell<Self>>> {
         let port = bind_addr.port();
-        let channel = UdpSocket::bind(bind_addr).await?;
+        let channel = Rc::new(UdpSocket::bind(bind_addr).await?);
         // TODO: set sndBufSize and rcvBufSize
 
-        // TODO: init snd_queue and rcv_queue
-
-        Ok(Self {
+        let mux = Self {
             id,
             port,
             reusable: config.reuse_addr,
             mss: config.mss,
-            channel,
-            snd_queue: VecDeque::new(),
-            rcv_queue: VecDeque::new(),
-        })
+            snd_queue: UdtSndQueue::new(),
+            rcv_queue: None,
+            channel: channel.clone(),
+            listener: None,
+        };
+
+        let mux_rc = Rc::new(RefCell::new(mux));
+        let rcv_queue = UdtRcvQueue::new(channel, config.mss, mux_rc.clone());
+        mux_rc.borrow_mut().rcv_queue = Some(rcv_queue);
+        Ok(mux_rc)
     }
 
     pub async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {

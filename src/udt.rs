@@ -9,7 +9,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::net::SocketAddr;
 use std::rc::Rc;
 
-type SocketRef = Rc<RefCell<UdtSocket>>;
+pub(crate) type SocketRef = Rc<RefCell<UdtSocket>>;
 
 #[derive(Default)]
 struct Udt {
@@ -135,7 +135,7 @@ impl Udt {
             return Err(Error::new(ErrorKind::Other, "socket already binded"));
         }
 
-        self.update_mux(&mut socket, addr);
+        self.update_mux(&mut socket, addr).await?;
         // TODO: continue
 
         Ok(())
@@ -158,11 +158,9 @@ impl Udt {
         }
 
         // A new multiplexer is needed
-        let mux = UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?;
-
-        // TODO init CTimer
-        let mux_id = mux.id;
-        let mux_rc = Rc::new(RefCell::new(mux));
+        let mux_rc =
+            UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?;
+        let mux_id = mux_rc.borrow().id;
         self.multiplexers.insert(mux_id, mux_rc.clone());
         socket.set_multiplexer(mux_rc);
         Ok(())
