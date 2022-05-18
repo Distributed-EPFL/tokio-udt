@@ -115,7 +115,7 @@ impl ControlPacketType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct HandShakeInfo {
     pub udt_version: u32,
     pub socket_type: SocketType,

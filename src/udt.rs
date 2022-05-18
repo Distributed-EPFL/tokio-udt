@@ -11,8 +11,12 @@ use std::rc::Rc;
 
 pub(crate) type SocketRef = Rc<RefCell<UdtSocket>>;
 
-#[derive(Default)]
-struct Udt {
+thread_local! {
+    pub static UDT_INSTANCE: Rc<RefCell<Udt>> = Rc::new(RefCell::new(Udt::new()));
+}
+
+#[derive(Default, Debug)]
+pub struct Udt {
     sockets: BTreeMap<SocketId, SocketRef>,
     closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Rc<RefCell<UdtMultiplexer>>>,
@@ -29,20 +33,24 @@ impl Udt {
         }
     }
 
+    pub fn get() -> Rc<RefCell<Self>> {
+        UDT_INSTANCE.with(|udt| udt.clone())
+    }
+
     fn get_new_socket_id(&mut self) -> SocketId {
         let socket_id = self.next_socket_id;
         self.next_socket_id = self.next_socket_id.wrapping_sub(1);
         socket_id
     }
 
-    pub fn get_socket(&self, socket_id: SocketId) -> Option<Rc<RefCell<UdtSocket>>> {
+    pub(crate) fn get_socket(&self, socket_id: SocketId) -> Option<Rc<RefCell<UdtSocket>>> {
         self.sockets
             .get(&socket_id)
             .filter(|s| s.borrow().status != UdtStatus::Closed)
             .cloned()
     }
 
-    pub fn get_peer_socket(
+    pub(crate) fn get_peer_socket(
         &mut self,
         peer: SocketAddr,
         socket_id: SocketId,
@@ -56,7 +64,7 @@ impl Udt {
             .cloned()
     }
 
-    pub fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
+    pub(crate) fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
         let socket = UdtSocket::new(self.get_new_socket_id(), socket_type);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
@@ -68,11 +76,11 @@ impl Udt {
         ))
     }
 
-    pub async fn new_connection(
+    pub(crate) async fn new_connection(
         &mut self,
         listener_socket_id: SocketId,
         peer: SocketAddr,
-        hs: HandShakeInfo,
+        hs: &HandShakeInfo,
     ) -> Result<()> {
         if let Some(existing_peer_socket) =
             self.get_peer_socket(peer, hs.socket_id, hs.initial_seq_number)
@@ -103,7 +111,8 @@ impl Udt {
             return Err(Error::new(ErrorKind::Other, "Too many queued sockets"));
         }
 
-        let mut new_socket = UdtSocket::new(self.get_new_socket_id(), hs.socket_type)
+        let new_socket_id = self.get_new_socket_id();
+        let mut new_socket = UdtSocket::new(new_socket_id, hs.socket_type)
             .with_peer(peer, hs.socket_id)
             .with_listen_socket(&listener_socket.borrow())
             .with_initial_seq_number(hs.initial_seq_number);
@@ -112,7 +121,7 @@ impl Udt {
         let ns_id = new_socket.socket_id;
         let ns_isn = new_socket.initial_seq_number;
         let ns_peer_socket_id = hs.socket_id;
-        let new_socket_rc = new_socket.connect_on_handshake(peer, hs).await?;
+        let new_socket_rc = new_socket.connect_on_handshake(peer, hs.clone()).await?;
         self.peers
             .entry((ns_peer_socket_id, ns_isn))
             .or_default()
@@ -141,7 +150,7 @@ impl Udt {
         Ok(())
     }
 
-    pub async fn update_mux(
+    pub(crate) async fn update_mux(
         &mut self,
         socket: &mut UdtSocket,
         bind_addr: SocketAddr,

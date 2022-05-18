@@ -2,6 +2,8 @@ use super::control_packet::{ControlPacketType, HandShakeInfo, UdtControlPacket};
 use super::data_packet::UdtDataPacket;
 use tokio::io::{Error, ErrorKind, Result};
 
+pub const UDT_HEADER_SIZE: u32 = 16;
+
 #[derive(Debug)]
 pub(crate) enum UdtPacket {
     Control(UdtControlPacket),
@@ -41,10 +43,22 @@ impl UdtPacket {
     pub fn handshake(&self) -> Option<&HandShakeInfo> {
         match self {
             Self::Control(ctrl) => match &ctrl.packet_type {
-                ControlPacketType::Handshake(info) => Some(&info),
+                ControlPacketType::Handshake(info) => Some(info),
                 _ => None,
             },
             _ => None,
         }
+    }
+}
+
+impl From<UdtControlPacket> for UdtPacket {
+    fn from(ctrl: UdtControlPacket) -> Self {
+        Self::Control(ctrl)
+    }
+}
+
+impl From<UdtDataPacket> for UdtPacket {
+    fn from(data_packet: UdtDataPacket) -> Self {
+        Self::Data(data_packet)
     }
 }

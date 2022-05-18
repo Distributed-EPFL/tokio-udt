@@ -31,7 +31,7 @@ impl UdtMultiplexer {
     ) -> Result<Rc<RefCell<Self>>> {
         let port = bind_addr.port();
         let channel = Rc::new(UdpSocket::bind(bind_addr).await?);
-        // TODO: set sndBufSize and rcvBufSize
+        // TODO: set UDP sndBufSize and rcvBufSize ?
 
         let mux = Self {
             id,

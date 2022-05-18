@@ -1,5 +1,6 @@
 const DEFAULT_MSS: u32 = 1500;
 const DEFAULT_UDT_BUF_SIZE: u32 = 8192;
+const UDT_VERSION: u32 = 4;
 
 #[derive(Debug)]
 pub(crate) struct UdtConfiguration {
@@ -18,6 +19,12 @@ pub(crate) struct UdtConfiguration {
     // socktype
     // ip_version
     // rendezvous: bool
+}
+
+impl UdtConfiguration {
+    pub fn udt_version(&self) -> u32 {
+        UDT_VERSION
+    }
 }
 
 impl Default for UdtConfiguration {

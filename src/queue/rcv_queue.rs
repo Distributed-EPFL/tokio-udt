@@ -1,6 +1,7 @@
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
-use crate::socket::UdtSocket;
+use crate::socket::{UdtSocket, UdtStatus};
+use crate::udt::Udt;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -12,7 +13,7 @@ use tokio::sync::Notify;
 pub(crate) struct UdtRcvQueue {
     sockets: VecDeque<Rc<RefCell<UdtSocket>>>,
     notify: Notify,
-    packets: Vec<UdtPacket>,
+    // packets: Vec<UdtPacket>,
     payload_size: u32,
     channel: Rc<UdpSocket>,
     multiplexer: Rc<RefCell<UdtMultiplexer>>,
@@ -27,7 +28,6 @@ impl UdtRcvQueue {
         Self {
             sockets: VecDeque::new(),
             notify: Notify::new(),
-            packets: vec![],
             payload_size,
             channel,
             multiplexer: mux,
@@ -49,13 +49,26 @@ impl UdtRcvQueue {
             if socket_id == 0 {
                 if let Some(handshake) = packet.handshake() {
                     if let Some(ref listener) = self.multiplexer.borrow().listener {
-                        listener.borrow().listen_on_handshake(addr, handshake);
+                        listener
+                            .borrow()
+                            .listen_on_handshake(addr, handshake)
+                            .await?;
                     }
                 } else {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
                         "received non-hanshake packet with socket 0",
                     ));
+                }
+            } else {
+                if let Some(socket) = Udt::get().borrow().get_socket(socket_id) {
+                    let mut socket = socket.borrow_mut();
+                    if socket.peer_addr == Some(addr) && socket.status == UdtStatus::Connected {
+                        socket.process_packet(packet)?;
+                    }
+                } else {
+                    eprintln!("socket not found for socket_id {}", socket_id);
+                    // TODO: implement rendezvous queue
                 }
             }
         }
