@@ -13,6 +13,10 @@ impl UdtDataPacket {
         let data = raw.drain(16..).collect();
         Ok(Self { header, data })
     }
+
+    pub fn payload_len(&self) -> u32 {
+        self.data.len() as u32
+    }
 }
 
 #[derive(Debug)]

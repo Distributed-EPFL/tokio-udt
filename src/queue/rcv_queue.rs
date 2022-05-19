@@ -64,7 +64,7 @@ impl UdtRcvQueue {
                 if let Some(socket) = Udt::get().borrow().get_socket(socket_id) {
                     let mut socket = socket.borrow_mut();
                     if socket.peer_addr == Some(addr) && socket.status == UdtStatus::Connected {
-                        socket.process_packet(packet)?;
+                        socket.process_packet(packet).await?;
                     }
                 } else {
                     eprintln!("socket not found for socket_id {}", socket_id);

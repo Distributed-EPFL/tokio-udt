@@ -2,6 +2,7 @@ use crate::configuration::UdtConfiguration;
 use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::data_packet::UdtDataPacket;
 use crate::flow::{UdtFlow, PROBE_MODULO};
+use crate::loss_list::RcvLossList;
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
 use crate::queue::RcvBuffer;
@@ -14,7 +15,10 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use tokio::io::{Error, ErrorKind, Result};
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
+
+const SYN_INTERVAL: Duration = Duration::from_millis(10);
+const MIN_NAK_INTERVAL: Duration = Duration::from_millis(300);
 
 pub type SocketId = u32;
 
@@ -49,6 +53,11 @@ pub(crate) struct UdtSocket {
     start_time: Instant,
     last_rsp_time: Instant,
     last_ack_number: SeqNumber,
+    curr_rcv_seq_number: SeqNumber,
+    rcv_loss_list: RcvLossList,
+
+    next_ack_time: Instant,
+    next_nak_time: Instant,
 }
 
 impl UdtSocket {
@@ -75,8 +84,13 @@ impl UdtSocket {
             self_ip: None,
             start_time: now,
             last_rsp_time: now,
-            last_ack_number: initial_seq_number,
+            last_ack_number: initial_seq_number - 1,
+            rcv_loss_list: RcvLossList::new(configuration.flight_flag_size),
             configuration: configuration,
+            curr_rcv_seq_number: initial_seq_number - 1,
+
+            next_ack_time: now + SYN_INTERVAL,
+            next_nak_time: now + MIN_NAK_INTERVAL,
         }
     }
 
@@ -235,18 +249,18 @@ impl UdtSocket {
         Ok(())
     }
 
-    pub fn process_packet(&mut self, packet: UdtPacket) -> Result<()> {
+    pub async fn process_packet(&mut self, packet: UdtPacket) -> Result<()> {
         match packet {
-            UdtPacket::Control(ctrl) => self.process_ctrl(ctrl),
-            UdtPacket::Data(data) => self.process_data(data),
+            UdtPacket::Control(ctrl) => self.process_ctrl(ctrl).await,
+            UdtPacket::Data(data) => self.process_data(data).await,
         }
     }
 
-    fn process_ctrl(&self, packet: UdtControlPacket) -> Result<()> {
+    async fn process_ctrl(&self, packet: UdtControlPacket) -> Result<()> {
         !unimplemented!()
     }
 
-    fn process_data(&mut self, packet: UdtDataPacket) -> Result<()> {
+    async fn process_data(&mut self, packet: UdtDataPacket) -> Result<()> {
         self.last_rsp_time = Instant::now();
 
         // CC onPktReceived
@@ -263,7 +277,7 @@ impl UdtSocket {
 
         // trace_rcv++
         // recv_total++
-        let offset = self.last_ack_number - packet.header.seq_number;
+        let offset = self.last_ack_number - seq_number;
         if offset < 0 {
             return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
         }
@@ -273,6 +287,40 @@ impl UdtSocket {
                 "not enough space in rcv buffer",
             ));
         }
+
+        let payload_len = packet.payload_len();
+        self.rcv_buffer.insert(packet)?;
+        if seq_number > self.curr_rcv_seq_number + 1 {
+            // some packets have been lost in between
+            self.rcv_loss_list
+                .insert(self.curr_rcv_seq_number + 1, seq_number - 1);
+
+            // send NAK immedialtely
+            let loss_list = {
+                if self.curr_rcv_seq_number + 1 == seq_number - 1 {
+                    vec![(seq_number - 1).number()]
+                } else {
+                    vec![
+                        (self.curr_rcv_seq_number + 1).number() | 0x80000000,
+                        (seq_number - 1).number(),
+                    ]
+                }
+            };
+            let nak_packet = UdtControlPacket::new_nak(loss_list, self.peer_socket_id.unwrap_or(0));
+            self.send_packet(nak_packet.into()).await?;
+            // TODO increment NAK stats
+        }
+
+        if payload_len < self.get_max_payload_size() {
+            self.next_ack_time = Instant::now();
+        }
+
+        if seq_number - self.curr_rcv_seq_number > 0 {
+            self.curr_rcv_seq_number = seq_number;
+        } else {
+            self.rcv_loss_list.remove(seq_number);
+        }
+
         Ok(())
     }
 
@@ -281,6 +329,13 @@ impl UdtSocket {
             Some(IpAddr::V6(_)) => self.configuration.mss - 40 - UDT_HEADER_SIZE,
             _ => self.configuration.mss - 28 - UDT_HEADER_SIZE,
         }
+    }
+
+    async fn send_packet(&self, packet: UdtPacket) -> Result<()> {
+        if let Some(addr) = self.peer_addr {
+            self.send_to(&addr, packet).await?;
+        }
+        Ok(())
     }
 }
 

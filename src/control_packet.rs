@@ -25,6 +25,18 @@ impl UdtControlPacket {
         }
     }
 
+    pub fn new_nak(loss_list: Vec<u32>, dest_socket_id: SocketId) -> Self {
+        Self {
+            packet_type: ControlPacketType::Nak(NakInfo {
+                loss_info: loss_list,
+            }),
+            reserved: 0,
+            additional_info: 0,
+            timestamp: 0,
+            dest_socket_id,
+        }
+    }
+
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::with_capacity(8);
         buffer.extend_from_slice(&(0xf000 + self.packet_type.type_as_u15()).to_be_bytes());

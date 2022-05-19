@@ -1,6 +1,6 @@
 use rand::Rng;
 
-const MAX_SEQ_NUMBER: u32 = 0x7fffffff;
+pub const MAX_SEQ_NUMBER: u32 = 0x7fffffff;
 const SEQ_NUMBER_OFFSET_THRESHOLD: u32 = 0x3fffffff;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -19,6 +19,14 @@ impl SeqNumber {
 
     pub fn random() -> Self {
         rand::thread_rng().gen_range(0..=MAX_SEQ_NUMBER).into()
+    }
+
+    pub fn zero() -> Self {
+        Self(0)
+    }
+
+    pub fn max() -> Self {
+        Self(MAX_SEQ_NUMBER)
     }
 }
 

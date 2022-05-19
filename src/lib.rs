@@ -3,6 +3,7 @@ mod configuration;
 mod control_packet;
 mod data_packet;
 mod flow;
+mod loss_list;
 mod multiplexer;
 mod packet;
 mod queue;
