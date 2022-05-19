@@ -1,6 +1,7 @@
 use super::configuration::UdtConfiguration;
 use crate::control_packet::HandShakeInfo;
 use crate::multiplexer::{MultiplexerId, UdtMultiplexer};
+use crate::seq_number::SeqNumber;
 use crate::socket::{SocketId, SocketType, UdtSocket, UdtStatus};
 use std::cell::RefCell;
 use std::collections::btree_map::Entry;
@@ -22,7 +23,7 @@ pub struct Udt {
     multiplexers: BTreeMap<MultiplexerId, Rc<RefCell<UdtMultiplexer>>>,
     next_socket_id: SocketId,
     configuration: UdtConfiguration,
-    peers: BTreeMap<(SocketId, u32), BTreeSet<SocketRef>>,
+    peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketRef>>,
 }
 
 impl Udt {
@@ -54,7 +55,7 @@ impl Udt {
         &mut self,
         peer: SocketAddr,
         socket_id: SocketId,
-        initial_seq_number: u32,
+        initial_seq_number: SeqNumber,
     ) -> Option<SocketRef> {
         self.peers
             .get(&(socket_id, initial_seq_number))?

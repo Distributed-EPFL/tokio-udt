@@ -1,4 +1,3 @@
-use crate::common::seq_number_offset;
 use crate::configuration::UdtConfiguration;
 use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::data_packet::UdtDataPacket;
@@ -6,7 +5,8 @@ use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
 use crate::queue::RcvBuffer;
-use crate::udt::{Udt, UDT_INSTANCE};
+use crate::seq_number::SeqNumber;
+use crate::udt::Udt;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -32,7 +32,7 @@ pub(crate) struct UdtSocket {
     listen_socket: Option<SocketId>,
     pub peer_addr: Option<SocketAddr>,
     pub peer_socket_id: Option<SocketId>,
-    pub initial_seq_number: u32,
+    pub initial_seq_number: SeqNumber,
 
     pub queued_sockets: BTreeSet<SocketId>,
     pub accepted_socket: BTreeSet<SocketId>,
@@ -48,13 +48,13 @@ pub(crate) struct UdtSocket {
 
     start_time: Instant,
     last_rsp_time: Instant,
-    last_ack_number: u32,
+    last_ack_number: SeqNumber,
 }
 
 impl UdtSocket {
     pub fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
         let now = Instant::now();
-        let initial_seq_number = rand::random();
+        let initial_seq_number = SeqNumber::random();
         let configuration = UdtConfiguration::default();
         Self {
             socket_id,
@@ -92,7 +92,7 @@ impl UdtSocket {
         self
     }
 
-    pub fn with_initial_seq_number(mut self, isn: u32) -> Self {
+    pub fn with_initial_seq_number(mut self, isn: SeqNumber) -> Self {
         self.initial_seq_number = isn;
         self
     }
@@ -255,15 +255,15 @@ impl UdtSocket {
         self.flow.on_pkt_arrival();
 
         let seq_number = packet.header.seq_number;
-        if seq_number % PROBE_MODULO == 0 {
+        if seq_number.number() % PROBE_MODULO == 0 {
             self.flow.on_probe1_arrival();
-        } else if seq_number % PROBE_MODULO == 1 {
+        } else if seq_number.number() % PROBE_MODULO == 1 {
             self.flow.on_probe2_arrival();
         }
 
         // trace_rcv++
         // recv_total++
-        let offset = seq_number_offset(self.last_ack_number, packet.header.seq_number);
+        let offset = self.last_ack_number - packet.header.seq_number;
         if offset < 0 {
             return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
         }

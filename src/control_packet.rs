@@ -1,5 +1,6 @@
 use super::socket::{SocketId, SocketType};
 use crate::common::ip_to_bytes;
+use crate::seq_number::SeqNumber;
 use std::net::IpAddr;
 use tokio::io::{Error, ErrorKind, Result};
 
@@ -119,7 +120,7 @@ impl ControlPacketType {
 pub(crate) struct HandShakeInfo {
     pub udt_version: u32,
     pub socket_type: SocketType,
-    pub initial_seq_number: u32,
+    pub initial_seq_number: SeqNumber,
     pub max_packet_size: u32,
     pub max_window_size: u32,
     pub connection_type: i32, // regular or rendezvous
@@ -133,7 +134,7 @@ impl HandShakeInfo {
         [
             self.udt_version,
             self.socket_type as u32,
-            self.initial_seq_number,
+            self.initial_seq_number.number(),
             self.max_packet_size,
             self.max_window_size,
         ]
@@ -155,7 +156,7 @@ impl HandShakeInfo {
 pub(crate) struct AckInfo {
     /// The packet sequence number to which all the
     /// previous packets have been received (excluding)
-    pub next_seq_number: u32,
+    pub next_seq_number: SeqNumber,
     pub info: Option<AckOptionalInfo>,
 }
 
@@ -188,8 +189,8 @@ impl NakInfo {
 
 #[derive(Debug)]
 pub(crate) struct DropRequestInfo {
-    pub first_seq_number: u32,
-    pub last_seq_number: u32,
+    pub first_seq_number: SeqNumber,
+    pub last_seq_number: SeqNumber,
 }
 
 impl DropRequestInfo {

@@ -1,11 +1,12 @@
 use crate::data_packet::UdtDataPacket;
+use crate::seq_number::SeqNumber;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use tokio::io::{Error, ErrorKind, Result};
 
 #[derive(Debug)]
 pub(crate) struct RcvBuffer {
-    packets: BTreeMap<u32, UdtDataPacket>, // map: seq_number -> packet
+    packets: BTreeMap<SeqNumber, UdtDataPacket>, // map: seq_number -> packet
     max_size: u32,
 }
 

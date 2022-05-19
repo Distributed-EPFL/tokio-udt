@@ -6,6 +6,7 @@ mod flow;
 mod multiplexer;
 mod packet;
 mod queue;
+mod seq_number;
 mod socket;
 mod udt;
 
