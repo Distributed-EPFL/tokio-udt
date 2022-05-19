@@ -27,7 +27,7 @@ pub struct Udt {
 }
 
 impl Udt {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             next_socket_id: rand::random(),
             ..Default::default()
@@ -65,7 +65,7 @@ impl Udt {
             .cloned()
     }
 
-    pub(crate) fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
+    pub fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
         let socket = UdtSocket::new(self.get_new_socket_id(), socket_type);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {

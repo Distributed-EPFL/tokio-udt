@@ -23,13 +23,13 @@ const MIN_NAK_INTERVAL: Duration = Duration::from_millis(300);
 pub type SocketId = u32;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub(crate) enum SocketType {
+pub enum SocketType {
     Stream = 0,
     Datagram = 1,
 }
 
 #[derive(Debug)]
-pub(crate) struct UdtSocket {
+pub struct UdtSocket {
     pub socket_id: SocketId,
     pub status: UdtStatus,
     socket_type: SocketType,
@@ -61,7 +61,7 @@ pub(crate) struct UdtSocket {
 }
 
 impl UdtSocket {
-    pub fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
+    pub(crate) fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
         let now = Instant::now();
         let initial_seq_number = SeqNumber::random();
         let configuration = UdtConfiguration::default();
@@ -116,7 +116,7 @@ impl UdtSocket {
         self.status = UdtStatus::Opened;
     }
 
-    pub async fn connect_on_handshake(
+    pub(crate) async fn connect_on_handshake(
         mut self,
         peer: SocketAddr,
         mut hs: HandShakeInfo,
@@ -185,7 +185,7 @@ impl UdtSocket {
         )
     }
 
-    pub async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<()> {
+    pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<()> {
         self.multiplexer
             .as_ref()
             .expect("multiplexer not initialized")
@@ -195,7 +195,7 @@ impl UdtSocket {
         Ok(())
     }
 
-    pub async fn listen_on_handshake(&self, addr: SocketAddr, hs: &HandShakeInfo) -> Result<()> {
+    pub(crate) async fn listen_on_handshake(&self, addr: SocketAddr, hs: &HandShakeInfo) -> Result<()> {
         if self.status == UdtStatus::Closing || self.status == UdtStatus::Closed {
             return Err(Error::new(ErrorKind::ConnectionRefused, "socket closed"));
         }
@@ -249,14 +249,17 @@ impl UdtSocket {
         Ok(())
     }
 
-    pub async fn process_packet(&mut self, packet: UdtPacket) -> Result<()> {
+    pub(crate) async fn process_packet(&mut self, packet: UdtPacket) -> Result<()> {
         match packet {
             UdtPacket::Control(ctrl) => self.process_ctrl(ctrl).await,
             UdtPacket::Data(data) => self.process_data(data).await,
         }
     }
 
-    async fn process_ctrl(&self, packet: UdtControlPacket) -> Result<()> {
+    async fn process_ctrl(&mut self, packet: UdtControlPacket) -> Result<()> {
+        let now = Instant::now();
+        self.last_rsp_time = now;
+        
         !unimplemented!()
     }
 
@@ -360,7 +363,7 @@ impl PartialEq for UdtSocket {
 impl Eq for UdtSocket {}
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum UdtStatus {
+pub enum UdtStatus {
     Init,
     Opened,
     Listening,

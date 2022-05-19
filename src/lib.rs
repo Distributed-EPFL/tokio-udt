@@ -11,6 +11,9 @@ mod seq_number;
 mod socket;
 mod udt;
 
+pub use socket::UdtSocket;
+pub use udt::Udt;
+
 #[cfg(test)]
 mod tests {
     #[test]

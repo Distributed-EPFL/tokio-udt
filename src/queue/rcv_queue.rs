@@ -1,7 +1,7 @@
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::socket::{UdtSocket, UdtStatus};
-use crate::udt::Udt;
+use crate::udt::{Udt, SocketRef};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use tokio::sync::Notify;
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
-    sockets: VecDeque<Rc<RefCell<UdtSocket>>>,
+    sockets: VecDeque<SocketRef>,
     notify: Notify,
     // packets: Vec<UdtPacket>,
     payload_size: u32,
@@ -38,7 +38,7 @@ impl UdtRcvQueue {
         self.sockets.push_back(socket);
     }
 
-    async fn worker(&mut self) -> Result<()> {
+    pub(crate) async fn worker(&self) -> Result<()> {
         loop {
             // TODO: drop packet if no space in packets
 

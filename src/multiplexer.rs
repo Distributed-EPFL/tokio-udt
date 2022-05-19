@@ -7,19 +7,20 @@ use std::io::Result;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use tokio::net::UdpSocket;
+use tokio::task::LocalSet;
 
 pub type MultiplexerId = u32;
 
 #[derive(Debug)]
-pub(crate) struct UdtMultiplexer {
+pub struct UdtMultiplexer {
     pub id: MultiplexerId,
     pub port: u16,
     pub channel: Rc<UdpSocket>,
     pub reusable: bool,
     pub mss: u32,
 
-    pub snd_queue: UdtSndQueue,
-    pub rcv_queue: Option<UdtRcvQueue>,
+    pub(crate) snd_queue: UdtSndQueue,
+    pub(crate) rcv_queue: Option<UdtRcvQueue>,
     pub listener: Option<SocketRef>,
 }
 
@@ -46,11 +47,26 @@ impl UdtMultiplexer {
 
         let mux_rc = Rc::new(RefCell::new(mux));
         let rcv_queue = UdtRcvQueue::new(channel, config.mss, mux_rc.clone());
-        mux_rc.borrow_mut().rcv_queue = Some(rcv_queue);
+
+        // let local_set = LocalSet::new();
+        // {
+        //     let rcv_queue = rcv_queue.clone();
+        //     local_set.spawn_local(async move {
+        //         rcv_queue.worker();
+        //     });
+
+        //     local_set.spawn_local(async move {
+        //         snd_queue.worker();
+        //     });
+        // }
+        {
+            let mut mux = mux_rc.borrow_mut();
+            mux.rcv_queue = Some(rcv_queue);
+        }
         Ok(mux_rc)
     }
 
-    pub async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {
+    pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {
         self.channel.send_to(&packet.serialize(), addr).await
     }
 
@@ -59,4 +75,13 @@ impl UdtMultiplexer {
             .local_addr()
             .expect("failed to retrieve udp local addr")
     }
+
+    // pub fn run(&mut self) {
+    //     let local_set = LocalSet::new();
+    //     local_set.spawn_local(async {
+    //         if let Some(rcv) = self.rcv_queue {
+    //             rcv.worker();
+    //         }
+    //     });
+    // }
 }

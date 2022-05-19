@@ -3,7 +3,7 @@ const DEFAULT_UDT_BUF_SIZE: u32 = 8192;
 const UDT_VERSION: u32 = 4;
 
 #[derive(Debug)]
-pub(crate) struct UdtConfiguration {
+pub struct UdtConfiguration {
     pub mss: u32,
     syn_sending: bool,
     syn_recving: bool,

@@ -40,7 +40,7 @@ impl UdtSndQueue {
         }
     }
 
-    async fn worker(&mut self) -> Result<()> {
+    pub async fn worker(&mut self) -> Result<()> {
         loop {
             if let Some(node) = self.sockets.peek() {
                 tokio::select! {

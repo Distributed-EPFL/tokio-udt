@@ -4,7 +4,7 @@ pub const MAX_SEQ_NUMBER: u32 = 0x7fffffff;
 const SEQ_NUMBER_OFFSET_THRESHOLD: u32 = 0x3fffffff;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub(crate) struct SeqNumber(u32);
+pub struct SeqNumber(u32);
 
 impl From<u32> for SeqNumber {
     fn from(num: u32) -> Self {
