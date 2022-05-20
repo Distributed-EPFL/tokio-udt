@@ -1,5 +1,7 @@
-use crate::seq_number::{SeqNumber, MAX_SEQ_NUMBER};
+use crate::seq_number::SeqNumber;
 use std::collections::BTreeMap;
+
+const MAX_SEQ_NUMBER: u32 = SeqNumber::MAX_NUMBER;
 
 #[derive(Debug)]
 pub(crate) struct RcvLossList {

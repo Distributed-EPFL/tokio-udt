@@ -1,12 +1,12 @@
 use crate::configuration::UdtConfiguration;
-use crate::control_packet::{HandShakeInfo, UdtControlPacket};
+use crate::control_packet::{ControlPacketType, HandShakeInfo, UdtControlPacket};
 use crate::data_packet::UdtDataPacket;
 use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::loss_list::RcvLossList;
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
 use crate::queue::RcvBuffer;
-use crate::seq_number::SeqNumber;
+use crate::seq_number::{AckSeqNumber, SeqNumber};
 use crate::udt::{SocketRef, Udt};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
@@ -49,15 +49,25 @@ pub struct UdtSocket<'a> {
     flow_window_size: u32,
     flow: UdtFlow,
     self_ip: Option<IpAddr>,
-
     start_time: Instant,
     last_rsp_time: Instant,
-    last_ack_number: SeqNumber,
+
+    // Receiving related,
+    last_sent_ack: SeqNumber,
     curr_rcv_seq_number: SeqNumber,
+    last_ack_seq_number: AckSeqNumber,
     rcv_loss_list: RcvLossList,
+
+    // Sending related
+    last_ack_received: SeqNumber,
+    last_data_ack_processed: SeqNumber,
+    last_ack2_sent_back: AckSeqNumber,
+    last_ack2_time: Instant,
 
     next_ack_time: Instant,
     next_nak_time: Instant,
+
+    exp_count: usize,
 }
 
 impl<'a> UdtSocket<'a> {
@@ -84,13 +94,22 @@ impl<'a> UdtSocket<'a> {
             self_ip: None,
             start_time: now,
             last_rsp_time: now,
-            last_ack_number: initial_seq_number - 1,
+            last_ack_seq_number: AckSeqNumber::zero(),
             rcv_loss_list: RcvLossList::new(configuration.flight_flag_size),
             configuration: configuration,
             curr_rcv_seq_number: initial_seq_number - 1,
 
             next_ack_time: now + SYN_INTERVAL,
             next_nak_time: now + MIN_NAK_INTERVAL,
+
+            exp_count: 1,
+            last_ack_received: initial_seq_number - 1,
+            last_sent_ack: initial_seq_number - 1,
+
+            // TO verify
+            last_ack2_sent_back: 0.into(),
+            last_ack2_time: now,
+            last_data_ack_processed: 0.into(),
         }
     }
 
@@ -267,9 +286,59 @@ impl<'a> UdtSocket<'a> {
     }
 
     async fn process_ctrl(&mut self, packet: UdtControlPacket) -> Result<()> {
+        self.exp_count = 1;
         let now = Instant::now();
         self.last_rsp_time = now;
 
+        match packet.packet_type {
+            ControlPacketType::Handshake(_) => (),
+            ControlPacketType::KeepAlive => (),
+            ControlPacketType::Ack(ref ack) => {
+                match &ack.info {
+                    None => {
+                        let seq = ack.next_seq_number;
+                        if seq >= self.last_ack_received {
+                            self.last_ack_received = seq;
+                            // TODO: Update flow window size?
+                        }
+                    }
+                    Some(extra) => {
+                        let ack_seq = packet.ack_seq_number().unwrap();
+                        if self.last_ack2_time.elapsed() > SYN_INTERVAL
+                            || ack_seq == self.last_ack2_sent_back
+                        {
+                            if let Some(peer) = self.peer_socket_id {
+                                let ack2_packet = UdtControlPacket::new_ack2(ack_seq, peer);
+                                self.send_packet(ack2_packet.into()).await?;
+                                self.last_ack2_sent_back = ack_seq;
+                                self.last_ack2_time = Instant::now();
+                            }
+                        }
+
+                        let seq = ack.next_seq_number;
+
+                        if (seq - self.curr_rcv_seq_number) > 1 {
+                            // This should not happen
+                            eprintln!("Udt socket broken: seq number is larger than expected");
+                            self.status = UdtStatus::Broken;
+                        }
+
+                        if (seq - self.last_ack_received) >= 0 {
+                            self.flow_window_size = extra.available_buf_size;
+                            self.last_ack_received = seq;
+                        }
+
+                        let offset = self.last_data_ack_processed - seq;
+                        if offset <= 0 {
+                            // Ignore Repeated acks
+                        }
+                        // TODO continue
+                    }
+                }
+            }
+            ControlPacketType::UserDefined => unimplemented!(),
+            _ => {}
+        }
         !unimplemented!()
     }
 
@@ -290,7 +359,7 @@ impl<'a> UdtSocket<'a> {
 
         // trace_rcv++
         // recv_total++
-        let offset = self.last_ack_number - seq_number;
+        let offset = self.last_sent_ack - seq_number;
         if offset < 0 {
             return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
         }

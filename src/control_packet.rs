@@ -1,6 +1,6 @@
 use super::socket::{SocketId, SocketType};
 use crate::common::ip_to_bytes;
-use crate::seq_number::SeqNumber;
+use crate::seq_number::{AckSeqNumber, SeqNumber};
 use std::net::IpAddr;
 use tokio::io::{Error, ErrorKind, Result};
 
@@ -35,6 +35,23 @@ impl UdtControlPacket {
             timestamp: 0,
             dest_socket_id,
         }
+    }
+
+    pub fn new_ack2(seq: AckSeqNumber, dest_socket_id: SocketId) -> Self {
+        Self {
+            packet_type: ControlPacketType::Ack2,
+            additional_info: seq.number(),
+            dest_socket_id,
+            reserved: 0,
+            timestamp: 0,
+        }
+    }
+
+    pub fn ack_seq_number(&self) -> Option<AckSeqNumber> {
+        if matches!(self.packet_type, ControlPacketType::Ack(_)) {
+            return Some(self.additional_info.into());
+        }
+        None
     }
 
     pub fn serialize(&self) -> Vec<u8> {
