@@ -21,7 +21,7 @@ impl RcvLossList {
             self.insert(SeqNumber::zero(), n2);
             return;
         }
-        if let Some((_, (start, end))) = self.sequences.range_mut(..=n1).next_back() {
+        if let Some((_, (_start, end))) = self.sequences.range_mut(..=n1).next_back() {
             if *end == n1 - 1 {
                 *end = n2;
                 return;

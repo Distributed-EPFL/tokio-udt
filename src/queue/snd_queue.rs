@@ -1,8 +1,8 @@
-use crate::socket::UdtSocket;
-use std::cell::RefCell;
+use crate::socket::SocketId;
+use crate::udt::SocketRef;
+use crate::udt::Udt;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::rc::Rc;
 use tokio::io::Result;
 use tokio::sync::Notify;
 use tokio::time::{sleep_until, Instant};
@@ -10,7 +10,13 @@ use tokio::time::{sleep_until, Instant};
 #[derive(Debug, PartialEq, Eq)]
 struct SendQueueNode {
     timestamp: Instant,
-    socket: Rc<RefCell<UdtSocket>>,
+    socket_id: SocketId,
+}
+
+impl SendQueueNode {
+    pub async fn socket(&self) -> Option<SocketRef<'static>> {
+        Udt::get().read().await.get_socket(self.socket_id).await
+    }
 }
 
 impl Ord for SendQueueNode {
@@ -48,7 +54,9 @@ impl UdtSndQueue {
                    _ = self.notify.notified() => {}
                 }
                 if let Some(node) = self.sockets.pop() {
-                    node.socket.borrow_mut().send_next_packet()?;
+                    if let Some(socket) = node.socket().await {
+                        socket.write().await.send_next_packet()?;
+                    }
                 }
             } else {
                 self.notify.notified().await

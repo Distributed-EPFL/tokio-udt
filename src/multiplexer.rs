@@ -2,36 +2,35 @@ use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
 use crate::queue::{UdtRcvQueue, UdtSndQueue};
 use crate::udt::SocketRef;
-use std::cell::RefCell;
 use std::io::Result;
 use std::net::SocketAddr;
-use std::rc::Rc;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::task::LocalSet;
+use tokio::sync::RwLock;
 
 pub type MultiplexerId = u32;
 
 #[derive(Debug)]
-pub struct UdtMultiplexer {
+pub struct UdtMultiplexer<'a> {
     pub id: MultiplexerId,
     pub port: u16,
-    pub channel: Rc<UdpSocket>,
+    pub channel: Arc<UdpSocket>,
     pub reusable: bool,
     pub mss: u32,
 
     pub(crate) snd_queue: UdtSndQueue,
-    pub(crate) rcv_queue: Option<UdtRcvQueue>,
-    pub listener: Option<SocketRef>,
+    pub(crate) rcv_queue: UdtRcvQueue<'a>,
+    pub listener: Option<SocketRef<'a>>,
 }
 
-impl UdtMultiplexer {
+impl<'a> UdtMultiplexer<'a> {
     pub async fn bind(
         id: MultiplexerId,
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
-    ) -> Result<Rc<RefCell<Self>>> {
+    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer<'a>>>)> {
         let port = bind_addr.port();
-        let channel = Rc::new(UdpSocket::bind(bind_addr).await?);
+        let channel = Arc::new(UdpSocket::bind(bind_addr).await?);
         // TODO: set UDP sndBufSize and rcvBufSize ?
 
         let mux = Self {
@@ -39,31 +38,17 @@ impl UdtMultiplexer {
             port,
             reusable: config.reuse_addr,
             mss: config.mss,
-            snd_queue: UdtSndQueue::new(),
-            rcv_queue: None,
             channel: channel.clone(),
+            snd_queue: UdtSndQueue::new(),
+            rcv_queue: UdtRcvQueue::new(channel, config.mss),
             listener: None,
         };
 
-        let mux_rc = Rc::new(RefCell::new(mux));
-        let rcv_queue = UdtRcvQueue::new(channel, config.mss, mux_rc.clone());
-
-        // let local_set = LocalSet::new();
-        // {
-        //     let rcv_queue = rcv_queue.clone();
-        //     local_set.spawn_local(async move {
-        //         rcv_queue.worker();
-        //     });
-
-        //     local_set.spawn_local(async move {
-        //         snd_queue.worker();
-        //     });
-        // }
-        {
-            let mut mux = mux_rc.borrow_mut();
-            mux.rcv_queue = Some(rcv_queue);
-        }
-        Ok(mux_rc)
+        let lock = Arc::new(RwLock::new(mux));
+        let lock2 = lock.clone();
+        let mut mux = lock.write_owned().await;
+        mux.rcv_queue.set_multiplexer(&lock2);
+        Ok((id, lock2))
     }
 
     pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {
@@ -76,12 +61,8 @@ impl UdtMultiplexer {
             .expect("failed to retrieve udp local addr")
     }
 
-    // pub fn run(&mut self) {
-    //     let local_set = LocalSet::new();
-    //     local_set.spawn_local(async {
-    //         if let Some(rcv) = self.rcv_queue {
-    //             rcv.worker();
-    //         }
-    //     });
-    // }
+    pub fn run(&'static mut self) {
+        tokio::spawn(async { self.rcv_queue.worker().await });
+        tokio::spawn(async { self.snd_queue.worker().await });
+    }
 }

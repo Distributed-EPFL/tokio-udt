@@ -15,9 +15,12 @@ pub(crate) struct UdtFlow {
 
 impl Default for UdtFlow {
     fn default() -> Self {
+        let now = Instant::now();
         Self {
-            last_arrival_time: Instant::now(),
-            ..Default::default()
+            last_arrival_time: now,
+            arrival_window: VecDeque::new(),
+            probe_time: now,
+            probe_window: VecDeque::new(),
         }
     }
 }

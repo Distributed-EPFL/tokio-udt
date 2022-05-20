@@ -7,14 +7,14 @@ use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
 use crate::queue::RcvBuffer;
 use crate::seq_number::SeqNumber;
-use crate::udt::Udt;
+use crate::udt::{SocketRef, Udt};
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
-use std::rc::Rc;
+use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
+use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
 const SYN_INTERVAL: Duration = Duration::from_millis(10);
@@ -29,7 +29,7 @@ pub enum SocketType {
 }
 
 #[derive(Debug)]
-pub struct UdtSocket {
+pub struct UdtSocket<'a> {
     pub socket_id: SocketId,
     pub status: UdtStatus,
     socket_type: SocketType,
@@ -41,7 +41,7 @@ pub struct UdtSocket {
     pub queued_sockets: BTreeSet<SocketId>,
     pub accepted_socket: BTreeSet<SocketId>,
     pub backlog_size: usize,
-    pub multiplexer: Option<Rc<RefCell<UdtMultiplexer>>>,
+    pub multiplexer: Weak<RwLock<UdtMultiplexer<'a>>>,
     pub configuration: UdtConfiguration,
 
     rcv_buffer: RcvBuffer,
@@ -60,7 +60,7 @@ pub struct UdtSocket {
     next_nak_time: Instant,
 }
 
-impl UdtSocket {
+impl<'a> UdtSocket<'a> {
     pub(crate) fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
         let now = Instant::now();
         let initial_seq_number = SeqNumber::random();
@@ -76,7 +76,7 @@ impl UdtSocket {
             queued_sockets: BTreeSet::new(),
             accepted_socket: BTreeSet::new(),
             backlog_size: 0,
-            multiplexer: None,
+            multiplexer: Weak::new(),
             // snd_buffer: vec![],
             rcv_buffer: RcvBuffer::new(configuration.rcv_buf_size),
             flow: UdtFlow::default(),
@@ -100,9 +100,13 @@ impl UdtSocket {
         self
     }
 
-    pub fn with_listen_socket(mut self, listen_socket: &UdtSocket) -> Self {
-        self.listen_socket = Some(listen_socket.socket_id);
-        self.multiplexer = listen_socket.multiplexer.clone();
+    pub fn with_listen_socket(
+        mut self,
+        listen_socket_id: SocketId,
+        mux: Arc<RwLock<UdtMultiplexer<'a>>>,
+    ) -> Self {
+        self.listen_socket = Some(listen_socket_id);
+        self.multiplexer = Arc::downgrade(&mux);
         self
     }
 
@@ -120,7 +124,7 @@ impl UdtSocket {
         mut self,
         peer: SocketAddr,
         mut hs: HandShakeInfo,
-    ) -> Result<Rc<RefCell<Self>>> {
+    ) -> Result<SocketRef<'a>> {
         if hs.max_packet_size > self.configuration.mss {
             hs.max_packet_size = self.configuration.mss;
         } else {
@@ -145,29 +149,29 @@ impl UdtSocket {
             hs,
             self.peer_socket_id.expect("peer_socket_id not defined"),
         );
-        let socket = Rc::new(RefCell::new(self));
 
-        if let Some(mut mux) = socket.borrow().multiplexer.as_ref().map(|m| m.borrow_mut()) {
-            if let Some(ref mut rcv_queue) = mux.rcv_queue {
-                rcv_queue.push_back(socket.clone());
-            }
+        if let Some(lock) = self.multiplexer.upgrade() {
+            let mut mux = lock.write().await;
+            mux.rcv_queue.push_back(self.socket_id);
             mux.send_to(&peer, UdtPacket::Control(packet)).await?;
         }
+        let socket = Arc::new(RwLock::new(self));
         Ok(socket)
     }
 
-    pub fn set_multiplexer(&mut self, mux: Rc<RefCell<UdtMultiplexer>>) {
-        self.multiplexer = Some(mux);
+    pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer<'a>>>) {
+        self.multiplexer = Arc::downgrade(mux);
     }
 
     pub fn set_self_ip(&mut self, ip: IpAddr) {
         self.self_ip = Some(ip);
     }
 
-    pub fn self_addr(&self) -> Option<SocketAddr> {
-        self.multiplexer
-            .as_ref()
-            .map(|m| m.borrow().get_local_addr())
+    pub async fn self_addr(&self) -> Option<SocketAddr> {
+        if let Some(mux) = self.multiplexer.upgrade() {
+            return Some(mux.read().await.get_local_addr());
+        }
+        None
     }
 
     pub fn send_next_packet(&mut self) -> Result<()> {
@@ -187,15 +191,20 @@ impl UdtSocket {
 
     pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<()> {
         self.multiplexer
-            .as_ref()
+            .upgrade()
             .expect("multiplexer not initialized")
-            .borrow()
+            .read()
+            .await
             .send_to(addr, packet)
             .await?;
         Ok(())
     }
 
-    pub(crate) async fn listen_on_handshake(&self, addr: SocketAddr, hs: &HandShakeInfo) -> Result<()> {
+    pub(crate) async fn listen_on_handshake(
+        &self,
+        addr: SocketAddr,
+        hs: &HandShakeInfo,
+    ) -> Result<()> {
         if self.status == UdtStatus::Closing || self.status == UdtStatus::Closed {
             return Err(Error::new(ErrorKind::ConnectionRefused, "socket closed"));
         }
@@ -241,7 +250,8 @@ impl UdtSocket {
         }
 
         Udt::get()
-            .borrow_mut()
+            .write()
+            .await
             .new_connection(self.socket_id, addr, hs)
             .await?;
         // Send handshake packet in case of errors on connection?
@@ -259,7 +269,7 @@ impl UdtSocket {
     async fn process_ctrl(&mut self, packet: UdtControlPacket) -> Result<()> {
         let now = Instant::now();
         self.last_rsp_time = now;
-        
+
         !unimplemented!()
     }
 
@@ -342,25 +352,25 @@ impl UdtSocket {
     }
 }
 
-impl Ord for UdtSocket {
+impl Ord for UdtSocket<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.socket_id.cmp(&other.socket_id)
     }
 }
 
-impl PartialOrd for UdtSocket {
+impl PartialOrd for UdtSocket<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for UdtSocket {
+impl PartialEq for UdtSocket<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.socket_id == other.socket_id
     }
 }
 
-impl Eq for UdtSocket {}
+impl Eq for UdtSocket<'_> {}
 
 #[derive(Debug, PartialEq)]
 pub enum UdtStatus {
