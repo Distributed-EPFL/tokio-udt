@@ -1,5 +1,5 @@
 use crate::data_packet::UdtDataPacket;
-use crate::seq_number::SeqNumber;
+use crate::seq_number::{MsgNumber, SeqNumber};
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use tokio::io::{Error, ErrorKind, Result};
@@ -34,5 +34,10 @@ impl RcvBuffer {
                 Ok(())
             }
         }
+    }
+
+    pub fn drop_msg(&mut self, msg: MsgNumber) {
+        self.packets
+            .retain(|_k, packet| packet.header.msg_number != msg);
     }
 }

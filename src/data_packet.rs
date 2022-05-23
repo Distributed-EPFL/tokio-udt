@@ -1,4 +1,4 @@
-use crate::seq_number::SeqNumber;
+use crate::seq_number::{MsgNumber, SeqNumber};
 use tokio::io::{Error, ErrorKind, Result};
 
 #[derive(Debug)]
@@ -25,7 +25,7 @@ pub(crate) struct UdtDataPacketHeader {
     pub seq_number: SeqNumber,    // bits 1-31
     pub position: PacketPosition, // bits 32-33
     pub in_order: bool,           // bit 34
-    pub msg_number: u32,          // bits 35-63
+    pub msg_number: MsgNumber,    // bits 35-63
     pub timestamp: u32,           // bits 64-95
     pub dest_socket_id: u32,      // bits 96-127
 }
@@ -48,7 +48,7 @@ impl UdtDataPacketHeader {
             seq_number: seq_number.into(),
             position,
             in_order,
-            msg_number,
+            msg_number: msg_number.into(),
             timestamp,
             dest_socket_id,
         })

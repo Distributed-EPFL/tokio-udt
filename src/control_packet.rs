@@ -1,6 +1,6 @@
 use super::socket::{SocketId, SocketType};
 use crate::common::ip_to_bytes;
-use crate::seq_number::{AckSeqNumber, SeqNumber};
+use crate::seq_number::{AckSeqNumber, MsgNumber, SeqNumber};
 use std::net::IpAddr;
 use tokio::io::{Error, ErrorKind, Result};
 
@@ -51,6 +51,15 @@ impl UdtControlPacket {
         match self.packet_type {
             ControlPacketType::Ack(_) => Some(self.additional_info.into()),
             ControlPacketType::Ack2 => Some(self.additional_info.into()),
+            _ => None,
+        }
+    }
+
+    pub fn msg_seq_number(&self) -> Option<MsgNumber> {
+        match self.packet_type {
+            ControlPacketType::MsgDropRequest(_) => {
+                Some((self.additional_info & MsgNumber::MAX_NUMBER).into())
+            }
             _ => None,
         }
     }

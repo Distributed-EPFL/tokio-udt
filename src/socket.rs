@@ -401,8 +401,21 @@ impl UdtSocket {
                     mux.snd_queue.update(self.socket_id, true).await;
                 }
             }
+            ControlPacketType::Shutdown => {
+                self.status = UdtStatus::Closing;
+            }
+            ControlPacketType::MsgDropRequest(ref drop) => {
+                let msg_number = packet.msg_seq_number().unwrap();
+                self.rcv_buffer.drop_msg(msg_number);
+                self.rcv_loss_list
+                    .remove_all(drop.first_seq_number, drop.last_seq_number);
+                if (drop.first_seq_number - (self.curr_rcv_seq_number + 1)) <= 0
+                    && (drop.last_seq_number - self.curr_rcv_seq_number) > 0
+                {
+                    self.curr_rcv_seq_number = drop.last_seq_number;
+                }
+            }
             ControlPacketType::UserDefined => unimplemented!(),
-            _ => unimplemented!(),
         }
         Ok(())
     }
@@ -483,6 +496,12 @@ impl UdtSocket {
             self.send_to(&addr, packet).await?;
         }
         Ok(())
+    }
+
+    fn cc_update(&mut self) {
+        // TODO update CC parameters
+
+        //self.interpacket_interval = ...
     }
 }
 
