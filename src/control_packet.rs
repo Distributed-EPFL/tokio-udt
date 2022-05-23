@@ -48,10 +48,11 @@ impl UdtControlPacket {
     }
 
     pub fn ack_seq_number(&self) -> Option<AckSeqNumber> {
-        if matches!(self.packet_type, ControlPacketType::Ack(_)) {
-            return Some(self.additional_info.into());
+        match self.packet_type {
+            ControlPacketType::Ack(_) => Some(self.additional_info.into()),
+            ControlPacketType::Ack2 => Some(self.additional_info.into()),
+            _ => None,
         }
-        None
     }
 
     pub fn serialize(&self) -> Vec<u8> {

@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 pub type MultiplexerId = u32;
 
 #[derive(Debug)]
-pub struct UdtMultiplexer<'a> {
+pub struct UdtMultiplexer {
     pub id: MultiplexerId,
     pub port: u16,
     pub channel: Arc<UdpSocket>,
@@ -19,16 +19,16 @@ pub struct UdtMultiplexer<'a> {
     pub mss: u32,
 
     pub(crate) snd_queue: UdtSndQueue,
-    pub(crate) rcv_queue: UdtRcvQueue<'a>,
-    pub listener: Option<SocketRef<'a>>,
+    pub(crate) rcv_queue: UdtRcvQueue,
+    pub listener: Option<SocketRef>,
 }
 
-impl<'a> UdtMultiplexer<'a> {
+impl UdtMultiplexer {
     pub async fn bind(
         id: MultiplexerId,
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
-    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer<'a>>>)> {
+    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer>>)> {
         let port = bind_addr.port();
         let channel = Arc::new(UdpSocket::bind(bind_addr).await?);
         // TODO: set UDP sndBufSize and rcvBufSize ?
@@ -61,8 +61,9 @@ impl<'a> UdtMultiplexer<'a> {
             .expect("failed to retrieve udp local addr")
     }
 
-    pub fn run(&'static mut self) {
-        tokio::spawn(async { self.rcv_queue.worker().await });
-        tokio::spawn(async { self.snd_queue.worker().await });
+    pub async fn run(mux: Arc<RwLock<Self>>) {
+        let mux2 = mux.clone();
+        tokio::spawn(async move { mux.read_owned().await.rcv_queue.worker().await });
+        tokio::spawn(async move { mux2.read_owned().await.snd_queue.worker().await });
     }
 }

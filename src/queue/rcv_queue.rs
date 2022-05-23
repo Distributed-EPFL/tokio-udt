@@ -9,16 +9,16 @@ use tokio::net::UdpSocket;
 use tokio::sync::{Notify, RwLock};
 
 #[derive(Debug)]
-pub(crate) struct UdtRcvQueue<'a> {
+pub(crate) struct UdtRcvQueue {
     sockets: VecDeque<SocketId>,
     notify: Notify,
     // packets: Vec<UdtPacket>,
     payload_size: u32,
     channel: Arc<UdpSocket>,
-    multiplexer: Weak<RwLock<UdtMultiplexer<'a>>>,
+    multiplexer: Weak<RwLock<UdtMultiplexer>>,
 }
 
-impl<'a> UdtRcvQueue<'a> {
+impl UdtRcvQueue {
     pub fn new(channel: Arc<UdpSocket>, payload_size: u32) -> Self {
         Self {
             sockets: VecDeque::new(),
@@ -33,7 +33,7 @@ impl<'a> UdtRcvQueue<'a> {
         self.sockets.push_back(socket_id);
     }
 
-    pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer<'a>>>) {
+    pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer>>) {
         self.multiplexer = Arc::downgrade(mux);
     }
 

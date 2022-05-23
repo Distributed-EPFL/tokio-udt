@@ -23,13 +23,29 @@ impl RcvLossList {
             self.insert(SeqNumber::zero(), n2);
             return;
         }
+
+        let mut keys_to_remove = vec![];
+        for (key, (start, end)) in self.sequences.range_mut((n1 + 1)..=n2) {
+            if *end > n2 {
+                *start = n2 + 1;
+            } else {
+                keys_to_remove.push(*key);
+            }
+        }
+        for key in keys_to_remove {
+            self.sequences.remove(&key);
+        }
+
         if let Some((_, (_start, end))) = self.sequences.range_mut(..=n1).next_back() {
             if *end == n1 - 1 {
                 *end = n2;
                 return;
             }
         }
-        self.sequences.insert(n1, (n1, n2));
+        self.sequences
+            .entry(n1)
+            .and_modify(|(_start, end)| *end = std::cmp::max(*end, n2))
+            .or_insert((n1, n2));
     }
 
     pub fn remove(&mut self, num: SeqNumber) {
@@ -51,7 +67,7 @@ impl RcvLossList {
         }
     }
 
-    fn remove_all(&mut self, n1: SeqNumber, n2: SeqNumber) {
+    pub fn remove_all(&mut self, n1: SeqNumber, n2: SeqNumber) {
         if n1 <= n2 {
             for i in n1.number()..=n2.number() {
                 self.remove(i.into());

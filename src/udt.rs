@@ -11,21 +11,21 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) type SocketRef<'a> = Arc<RwLock<UdtSocket<'a>>>;
+pub(crate) type SocketRef = Arc<RwLock<UdtSocket>>;
 
-pub static UDT_INSTANCE: OnceCell<RwLock<Udt<'static>>> = OnceCell::new();
+pub static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
 
 #[derive(Default, Debug)]
-pub struct Udt<'a> {
-    sockets: BTreeMap<SocketId, SocketRef<'a>>,
-    closed_sockets: BTreeMap<SocketId, SocketRef<'a>>,
-    multiplexers: BTreeMap<MultiplexerId, Arc<RwLock<UdtMultiplexer<'a>>>>,
+pub struct Udt {
+    sockets: BTreeMap<SocketId, SocketRef>,
+    closed_sockets: BTreeMap<SocketId, SocketRef>,
+    multiplexers: BTreeMap<MultiplexerId, Arc<RwLock<UdtMultiplexer>>>,
     next_socket_id: SocketId,
     configuration: UdtConfiguration,
     peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketId>>, // peer socket id -> local socket id
 }
 
-impl Udt<'static> {
+impl Udt {
     fn new() -> Self {
         Self {
             next_socket_id: rand::random(),
@@ -43,7 +43,7 @@ impl Udt<'static> {
         socket_id
     }
 
-    pub(crate) async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef<'static>> {
+    pub(crate) async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
         if let Some(lock) = self.sockets.get(&socket_id) {
             let socket = lock.read().await;
             if socket.status != UdtStatus::Closed {
@@ -58,7 +58,7 @@ impl Udt<'static> {
         peer: SocketAddr,
         socket_id: SocketId,
         initial_seq_number: SeqNumber,
-    ) -> Option<SocketRef<'static>> {
+    ) -> Option<SocketRef> {
         for socket_lock in self
             .peers
             .get(&(socket_id, initial_seq_number))?
@@ -73,7 +73,7 @@ impl Udt<'static> {
         None
     }
 
-    pub fn new_socket(&mut self, socket_type: SocketType) -> Result<&'static SocketRef> {
+    pub fn new_socket(&'static mut self, socket_type: SocketType) -> Result<&'static SocketRef> {
         let socket = UdtSocket::new(self.get_new_socket_id(), socket_type);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
@@ -175,7 +175,7 @@ impl Udt<'static> {
 
     pub(crate) async fn update_mux(
         &'static mut self,
-        socket: &mut UdtSocket<'static>,
+        socket: &mut UdtSocket,
         bind_addr: SocketAddr,
     ) -> Result<()> {
         if self.configuration.reuse_addr {
@@ -194,6 +194,9 @@ impl Udt<'static> {
             UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?;
         self.multiplexers.insert(mux_id, mux.clone());
         socket.set_multiplexer(&mux);
+        tokio::spawn(async move {
+            UdtMultiplexer::run(mux).await;
+        });
         Ok(())
     }
 }

@@ -5,7 +5,7 @@ use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::loss_list::RcvLossList;
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
-use crate::queue::RcvBuffer;
+use crate::queue::{RcvBuffer, SndBuffer};
 use crate::seq_number::{AckSeqNumber, SeqNumber};
 use crate::udt::{SocketRef, Udt};
 use sha2::{Digest, Sha256};
@@ -29,7 +29,7 @@ pub enum SocketType {
 }
 
 #[derive(Debug)]
-pub struct UdtSocket<'a> {
+pub struct UdtSocket {
     pub socket_id: SocketId,
     pub status: UdtStatus,
     socket_type: SocketType,
@@ -41,11 +41,11 @@ pub struct UdtSocket<'a> {
     pub queued_sockets: BTreeSet<SocketId>,
     pub accepted_socket: BTreeSet<SocketId>,
     pub backlog_size: usize,
-    pub multiplexer: Weak<RwLock<UdtMultiplexer<'a>>>,
+    pub multiplexer: Weak<RwLock<UdtMultiplexer>>,
     pub configuration: UdtConfiguration,
 
     rcv_buffer: RcvBuffer,
-    // snd_buffer: Vec<u8>,
+    snd_buffer: SndBuffer,
     flow_window_size: u32,
     flow: UdtFlow,
     self_ip: Option<IpAddr>,
@@ -57,20 +57,24 @@ pub struct UdtSocket<'a> {
     curr_rcv_seq_number: SeqNumber,
     last_ack_seq_number: AckSeqNumber,
     rcv_loss_list: RcvLossList,
+    last_ack2_received: AckSeqNumber,
 
     // Sending related
     last_ack_received: SeqNumber,
     last_data_ack_processed: SeqNumber,
     last_ack2_sent_back: AckSeqNumber,
+    curr_snd_seq_number: SeqNumber,
     last_ack2_time: Instant,
+    snd_loss_list: RcvLossList,
 
     next_ack_time: Instant,
     next_nak_time: Instant,
+    interpacket_interval: Duration,
 
     exp_count: usize,
 }
 
-impl<'a> UdtSocket<'a> {
+impl UdtSocket {
     pub(crate) fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
         let now = Instant::now();
         let initial_seq_number = SeqNumber::random();
@@ -87,7 +91,7 @@ impl<'a> UdtSocket<'a> {
             accepted_socket: BTreeSet::new(),
             backlog_size: 0,
             multiplexer: Weak::new(),
-            // snd_buffer: vec![],
+            snd_buffer: SndBuffer::new(configuration.mss),
             rcv_buffer: RcvBuffer::new(configuration.rcv_buf_size),
             flow: UdtFlow::default(),
             flow_window_size: 0,
@@ -96,20 +100,23 @@ impl<'a> UdtSocket<'a> {
             last_rsp_time: now,
             last_ack_seq_number: AckSeqNumber::zero(),
             rcv_loss_list: RcvLossList::new(configuration.flight_flag_size),
-            configuration: configuration,
             curr_rcv_seq_number: initial_seq_number - 1,
 
             next_ack_time: now + SYN_INTERVAL,
             next_nak_time: now + MIN_NAK_INTERVAL,
+            interpacket_interval: Duration::from_micros(10),
 
             exp_count: 1,
             last_ack_received: initial_seq_number - 1,
             last_sent_ack: initial_seq_number - 1,
+            last_ack2_received: initial_seq_number.number().into(),
 
-            // TO verify
-            last_ack2_sent_back: 0.into(),
+            curr_snd_seq_number: initial_seq_number - 1,
+            last_ack2_sent_back: initial_seq_number.number().into(),
             last_ack2_time: now,
-            last_data_ack_processed: 0.into(),
+            last_data_ack_processed: initial_seq_number,
+            snd_loss_list: RcvLossList::new(configuration.flight_flag_size * 2),
+            configuration: configuration,
         }
     }
 
@@ -122,7 +129,7 @@ impl<'a> UdtSocket<'a> {
     pub fn with_listen_socket(
         mut self,
         listen_socket_id: SocketId,
-        mux: Arc<RwLock<UdtMultiplexer<'a>>>,
+        mux: Arc<RwLock<UdtMultiplexer>>,
     ) -> Self {
         self.listen_socket = Some(listen_socket_id);
         self.multiplexer = Arc::downgrade(&mux);
@@ -143,7 +150,7 @@ impl<'a> UdtSocket<'a> {
         mut self,
         peer: SocketAddr,
         mut hs: HandShakeInfo,
-    ) -> Result<SocketRef<'a>> {
+    ) -> Result<SocketRef> {
         if hs.max_packet_size > self.configuration.mss {
             hs.max_packet_size = self.configuration.mss;
         } else {
@@ -178,7 +185,7 @@ impl<'a> UdtSocket<'a> {
         Ok(socket)
     }
 
-    pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer<'a>>>) {
+    pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer>>) {
         self.multiplexer = Arc::downgrade(mux);
     }
 
@@ -331,15 +338,73 @@ impl<'a> UdtSocket<'a> {
                         let offset = self.last_data_ack_processed - seq;
                         if offset <= 0 {
                             // Ignore Repeated acks
+                            return Ok(());
                         }
-                        // TODO continue
+
+                        self.snd_buffer.ack_data(offset);
+                        self.snd_loss_list
+                            .remove_all(self.last_data_ack_processed, seq - 1);
+                        // TODO record times for monitoring purposes
+                        self.last_data_ack_processed = seq;
+                        if let Some(lock) = self.multiplexer.upgrade() {
+                            let mux = lock.read().await;
+                            mux.snd_queue.update(self.socket_id, false).await;
+                        }
+
+                        // TODO: CCC
                     }
                 }
             }
+            ControlPacketType::Ack2 => {
+                let ack_seq = packet.ack_seq_number().unwrap();
+                // TODO: Compute RTT
+                if (ack_seq - self.last_ack2_received) > 0 {
+                    self.last_ack2_received = ack_seq;
+                }
+            }
+            ControlPacketType::Nak(ref nak) => {
+                let mut broken = false;
+                let loss_iter = &mut nak.loss_info.iter();
+                while let Some(loss) = loss_iter.next() {
+                    let (seq_start, seq_end) = {
+                        if loss & 0x8000000 != 0 {
+                            if let Some(seq_end) = loss_iter.next() {
+                                let seq_start: SeqNumber = (loss & 0x7fffffff).into();
+                                let seq_end: SeqNumber = (*seq_end).into();
+                                (seq_start, seq_end)
+                            } else {
+                                broken = true;
+                                break;
+                            }
+                        } else {
+                            ((*loss).into(), (*loss).into())
+                        }
+                    };
+                    if (seq_start - seq_end > 0) || (seq_end - self.curr_snd_seq_number > 0) {
+                        broken = true;
+                        break;
+                    }
+                    if seq_start - self.last_ack_received >= 0 {
+                        self.snd_loss_list.insert(seq_start, seq_end);
+                    } else if seq_end - self.last_ack_received >= 0 {
+                        self.snd_loss_list.insert(self.last_ack_received, seq_end);
+                    }
+                }
+
+                if broken {
+                    self.status = UdtStatus::Broken;
+                    return Ok(());
+                }
+
+                if let Some(lock) = self.multiplexer.upgrade() {
+                    let mux = lock.read().await;
+                    mux.snd_queue.update(self.socket_id, true).await;
+                }
+            }
             ControlPacketType::UserDefined => unimplemented!(),
-            _ => {}
+            _ => unimplemented!(),
         }
-        !unimplemented!()
+        Ok(())
     }
 
     async fn process_data(&mut self, packet: UdtDataPacket) -> Result<()> {
@@ -421,25 +486,25 @@ impl<'a> UdtSocket<'a> {
     }
 }
 
-impl Ord for UdtSocket<'_> {
+impl Ord for UdtSocket {
     fn cmp(&self, other: &Self) -> Ordering {
         self.socket_id.cmp(&other.socket_id)
     }
 }
 
-impl PartialOrd for UdtSocket<'_> {
+impl PartialOrd for UdtSocket {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for UdtSocket<'_> {
+impl PartialEq for UdtSocket {
     fn eq(&self, other: &Self) -> bool {
         self.socket_id == other.socket_id
     }
 }
 
-impl Eq for UdtSocket<'_> {}
+impl Eq for UdtSocket {}
 
 #[derive(Debug, PartialEq)]
 pub enum UdtStatus {
