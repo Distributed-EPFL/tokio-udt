@@ -200,8 +200,76 @@ impl UdtSocket {
         None
     }
 
-    pub fn send_next_packet(&mut self) -> Result<()> {
-        !unimplemented!()
+    pub(crate) async fn send_next_packet(&mut self) -> Result<Option<UdtPacket>> {
+        if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status) {
+            return Err(Error::new(
+                ErrorKind::BrokenPipe,
+                "socket is closed or broken",
+            ));
+        }
+        let now = Instant::now();
+        let mut probe = false;
+
+        let packet = match self.snd_loss_list.pop_after(self.last_data_ack_processed) {
+            Some(seq) => {
+                // Loss retransmission has priority
+                let offset = seq - self.last_data_ack_processed;
+                if offset < 0 {
+                    eprintln!("unexpected offset in sender loss list");
+                    return Ok(None);
+                }
+                match self.snd_buffer.read_data(
+                    offset as usize,
+                    seq,
+                    self.peer_socket_id.unwrap(),
+                    self.start_time,
+                ) {
+                    Err((msg_number, msg_len)) => {
+                        if msg_len == 0 {
+                            return Ok(None);
+                        }
+                        let (start, end) = (seq, seq + msg_len as i32 - 1);
+                        let drop = UdtControlPacket::new_drop(
+                            msg_number,
+                            start,
+                            end,
+                            self.peer_socket_id.unwrap(),
+                        );
+                        self.send_packet(drop.into()).await?;
+                        self.snd_loss_list
+                            .remove_all(self.last_data_ack_processed, end);
+                        if end + 1 - self.curr_snd_seq_number > 0 {
+                            self.curr_snd_seq_number = end + 1;
+                        }
+                        return Ok(None);
+                    }
+                    Ok(packet) => packet,
+                }
+            }
+            None => {
+                // TODO: check congestion window
+                let window_size = self.flow_window_size;
+                if (self.curr_snd_seq_number - self.last_ack_received) < window_size as i32 {
+                    return Ok(None);
+                }
+                match self.snd_buffer.fetch(
+                    self.curr_snd_seq_number + 1,
+                    self.peer_socket_id.unwrap(),
+                    self.start_time,
+                ) {
+                    Some(packet) => {
+                        self.curr_snd_seq_number = self.curr_snd_seq_number + 1;
+                        if self.curr_snd_seq_number.number() % 16 == 0 {
+                            probe = true;
+                        }
+                        packet
+                    }
+                    None => return Ok(None),
+                }
+            }
+        };
+
+        Ok(None)
     }
 
     fn compute_cookie(&self, addr: &SocketAddr, offset: Option<isize>) -> u32 {
@@ -304,9 +372,9 @@ impl UdtSocket {
                 match &ack.info {
                     None => {
                         let seq = ack.next_seq_number;
-                        if seq >= self.last_ack_received {
+                        if (seq - self.last_ack_received) >= 0 {
                             self.last_ack_received = seq;
-                            // TODO: Update flow window size?
+                            self.flow_window_size -= (seq - self.last_ack_received) as u32;
                         }
                     }
                     Some(extra) => {
@@ -335,7 +403,7 @@ impl UdtSocket {
                             self.last_ack_received = seq;
                         }
 
-                        let offset = self.last_data_ack_processed - seq;
+                        let offset = seq - self.last_data_ack_processed;
                         if offset <= 0 {
                             // Ignore Repeated acks
                             return Ok(());
@@ -437,7 +505,7 @@ impl UdtSocket {
 
         // trace_rcv++
         // recv_total++
-        let offset = self.last_sent_ack - seq_number;
+        let offset = seq_number - self.last_sent_ack;
         if offset < 0 {
             return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
         }
@@ -502,6 +570,13 @@ impl UdtSocket {
         // TODO update CC parameters
 
         //self.interpacket_interval = ...
+    }
+
+    fn check_timers(&mut self) {
+        self.cc_update();
+        let now = Instant::now();
+        if now > self.next_ack_time { // TODO: use CC ack interval too
+        }
     }
 }
 

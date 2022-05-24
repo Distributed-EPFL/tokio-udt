@@ -69,16 +69,12 @@ impl RcvLossList {
 
     pub fn remove_all(&mut self, n1: SeqNumber, n2: SeqNumber) {
         if n1 <= n2 {
-            for i in n1.number()..=n2.number() {
+            for i in (n1.number()..=n2.number()).rev() {
                 self.remove(i.into());
             }
         } else {
-            for i in n1.number()..=MAX_SEQ_NUMBER {
-                self.remove(i.into());
-            }
-            for i in 0..=n2.number() {
-                self.remove(i.into());
-            }
+            self.remove_all(n1, SeqNumber::max());
+            self.remove_all(SeqNumber::zero(), n2);
         }
     }
 
@@ -99,11 +95,11 @@ impl RcvLossList {
         false
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.sequences.is_empty()
     }
 
-    fn get_loss_array(&self, limit: usize) -> Vec<u32> {
+    pub fn get_loss_array(&self, limit: usize) -> Vec<u32> {
         let mut array: Vec<_> = self
             .sequences
             .values()
@@ -123,5 +119,28 @@ impl RcvLossList {
             }
         }
         array
+    }
+
+    pub fn pop_after(&mut self, after: SeqNumber) -> Option<SeqNumber> {
+        if self.sequences.is_empty() {
+            return None;
+        }
+        if let Some((_, (_start, end))) = self.sequences.range(..=after).next_back() {
+            if *end >= after {
+                self.remove(after);
+                return Some(after);
+            }
+        }
+        if let Some((_, (start, _end))) = self.sequences.range(after..).next() {
+            let start = start.clone();
+            self.remove(start);
+            return Some(start);
+        }
+        if let Some((_, (start, _end))) = self.sequences.iter().next() {
+            let start = start.clone();
+            self.remove(start);
+            return Some(start);
+        }
+        None
     }
 }

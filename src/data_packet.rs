@@ -55,7 +55,7 @@ impl UdtDataPacketHeader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum PacketPosition {
     First,
     Last,

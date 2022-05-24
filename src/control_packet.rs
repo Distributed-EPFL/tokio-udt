@@ -47,6 +47,24 @@ impl UdtControlPacket {
         }
     }
 
+    pub fn new_drop(
+        msg_id: MsgNumber,
+        first: SeqNumber,
+        last: SeqNumber,
+        dest_socket_id: SocketId,
+    ) -> Self {
+        Self {
+            packet_type: ControlPacketType::MsgDropRequest(DropRequestInfo {
+                first_seq_number: first,
+                last_seq_number: last,
+            }),
+            additional_info: msg_id.number(),
+            dest_socket_id,
+            reserved: 0,
+            timestamp: 0,
+        }
+    }
+
     pub fn ack_seq_number(&self) -> Option<AckSeqNumber> {
         match self.packet_type {
             ControlPacketType::Ack(_) => Some(self.additional_info.into()),

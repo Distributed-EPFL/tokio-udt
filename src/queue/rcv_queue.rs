@@ -64,6 +64,11 @@ impl UdtRcvQueue {
                     ));
                 }
             } else {
+                if !self.sockets.contains(&socket_id) {
+                    eprintln!("socket {} not present in rcv_queue", socket_id);
+                    continue;
+                }
+
                 if let Some(socket) = Udt::get().read().await.get_socket(socket_id).await {
                     let mut socket = socket.write().await;
                     if socket.peer_addr == Some(addr) && socket.status == UdtStatus::Connected {

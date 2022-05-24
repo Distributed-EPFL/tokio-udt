@@ -57,7 +57,7 @@ impl UdtSndQueue {
                 }
                 if let Some(node) = self.sockets.write().await.pop() {
                     if let Some(socket) = node.socket().await {
-                        socket.write().await.send_next_packet()?;
+                        socket.write().await.send_next_packet().await?;
                     }
                 }
             } else {
