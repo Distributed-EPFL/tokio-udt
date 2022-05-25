@@ -1,18 +1,15 @@
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
-use crate::socket::{SocketId, UdtStatus};
+use crate::socket::UdtStatus;
 use crate::udt::Udt;
-use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
-    sockets: VecDeque<SocketId>,
-    notify: Notify,
-    // packets: Vec<UdtPacket>,
+    // sockets: VecDeque<SocketId>,
     payload_size: u32,
     channel: Arc<UdpSocket>,
     multiplexer: Weak<RwLock<UdtMultiplexer>>,
@@ -21,17 +18,16 @@ pub(crate) struct UdtRcvQueue {
 impl UdtRcvQueue {
     pub fn new(channel: Arc<UdpSocket>, payload_size: u32) -> Self {
         Self {
-            sockets: VecDeque::new(),
-            notify: Notify::new(),
+            // sockets: VecDeque::new(),
             payload_size,
             channel,
             multiplexer: Weak::new(),
         }
     }
 
-    pub fn push_back(&mut self, socket_id: SocketId) {
-        self.sockets.push_back(socket_id);
-    }
+    // pub fn push_back(&mut self, socket_id: SocketId) {
+    //     self.sockets.push_back(socket_id);
+    // }
 
     pub fn set_multiplexer(&mut self, mux: &Arc<RwLock<UdtMultiplexer>>) {
         self.multiplexer = Arc::downgrade(mux);
@@ -64,15 +60,16 @@ impl UdtRcvQueue {
                     ));
                 }
             } else {
-                if !self.sockets.contains(&socket_id) {
-                    eprintln!("socket {} not present in rcv_queue", socket_id);
-                    continue;
-                }
+                // if !self.sockets.contains(&socket_id) {
+                //     eprintln!("socket {} not present in rcv_queue", socket_id);
+                //     continue;
+                // }
 
                 if let Some(socket) = Udt::get().read().await.get_socket(socket_id).await {
                     let mut socket = socket.write().await;
                     if socket.peer_addr == Some(addr) && socket.status == UdtStatus::Connected {
                         socket.process_packet(packet).await?;
+                        socket.check_timers().await;
                     }
                 } else {
                     eprintln!("socket not found for socket_id {}", socket_id);

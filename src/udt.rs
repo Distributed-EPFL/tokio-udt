@@ -18,7 +18,7 @@ pub static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
 #[derive(Default, Debug)]
 pub struct Udt {
     sockets: BTreeMap<SocketId, SocketRef>,
-    closed_sockets: BTreeMap<SocketId, SocketRef>,
+    // closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Arc<RwLock<UdtMultiplexer>>>,
     next_socket_id: SocketId,
     configuration: UdtConfiguration,

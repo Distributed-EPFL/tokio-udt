@@ -191,11 +191,13 @@ impl UdtSocket {
             self.peer_socket_id.expect("peer_socket_id not defined"),
         );
 
-        if let Some(lock) = self.multiplexer.upgrade() {
-            let mut mux = lock.write().await;
-            mux.rcv_queue.push_back(self.socket_id);
-            mux.send_to(&peer, UdtPacket::Control(packet)).await?;
-        }
+        self.send_packet(packet.into()).await?;
+        // if let Some(lock) = self.multiplexer.upgrade() {
+        //     let mut mux = lock.write().await;
+        //     mux.rcv_queue.push_back(self.socket_id);
+        //     mux.send_to(&peer, packet.into()).await?;
+        // }
+
         let socket = Arc::new(RwLock::new(self));
         Ok(socket)
     }
@@ -595,7 +597,7 @@ impl UdtSocket {
         //self.interpacket_interval = ...
     }
 
-    fn check_timers(&mut self) {
+    pub(crate) async fn check_timers(&mut self) {
         self.cc_update();
         let now = Instant::now();
         if now > self.next_ack_time { // TODO: use CC ack interval too
