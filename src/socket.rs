@@ -601,6 +601,39 @@ impl UdtSocket {
         if now > self.next_ack_time { // TODO: use CC ack interval too
         }
     }
+
+    pub async fn send(&mut self, data: Vec<u8>) -> Result<()> {
+        if self.socket_type != SocketType::Stream {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "socket needs to be configured in stream mode to send data buffer",
+            ));
+        }
+        if self.status != UdtStatus::Connected {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "UDT socket is not connected",
+            ));
+        }
+
+        if data.len() <= 0 {
+            return Ok(());
+        }
+
+        if self.snd_buffer.is_empty() {
+            // delay the EXP timer to avoid mis-fired timeout
+            self.last_rsp_time = Instant::now();
+        }
+
+        // TODO limit snd buffer size
+        self.snd_buffer.add_message(data, None, false);
+        if let Some(lock) = self.multiplexer.upgrade() {
+            let mux = lock.read().await;
+            mux.snd_queue.update(self.socket_id, false).await;
+        }
+
+        Ok(())
+    }
 }
 
 impl Ord for UdtSocket {

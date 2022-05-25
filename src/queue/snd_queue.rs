@@ -82,31 +82,20 @@ impl UdtSndQueue {
     }
 
     pub async fn update(&self, socket_id: SocketId, reschedule: bool) {
-        let mut remove = false;
-        let mut insert = false;
-        {
-            let mut sockets = self.sockets.write().await;
-            if reschedule {
-                if let Some(mut node) = sockets.peek_mut() {
-                    if node.socket_id == socket_id {
-                        node.timestamp = self.start_time;
-                        self.notify.notify_waiters();
-                        return;
-                    }
+        let mut sockets = self.sockets.write().await;
+        if reschedule {
+            if let Some(mut node) = sockets.peek_mut() {
+                if node.socket_id == socket_id {
+                    node.timestamp = self.start_time;
+                    self.notify.notify_waiters();
+                    return;
                 }
             }
-            if !sockets.iter().any(|n| n.socket_id == socket_id) {
-                insert = true;
-            } else if reschedule {
-                remove = true;
-                insert = true;
-            }
         }
-
-        if remove {
+        if !sockets.iter().any(|n| n.socket_id == socket_id) {
+            self.insert(self.start_time, socket_id).await;
+        } else if reschedule {
             self.remove(socket_id).await;
-        }
-        if insert {
             self.insert(self.start_time, socket_id).await;
         }
     }

@@ -141,4 +141,8 @@ impl SndBuffer {
         self.current_position += 1;
         Some(block.as_data_packet(seq_number, dest_socket_id, start_time))
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
 }
