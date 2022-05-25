@@ -119,7 +119,7 @@ impl SndBuffer {
                 if offset <= self.current_position && self.current_position < pos {
                     self.current_position = pos;
                 }
-                return Err((block.msg_number, msg_len));
+                Err((block.msg_number, msg_len))
             } else {
                 Ok(block.as_data_packet(seq_number, dest_socket_id, start_time))
             }

@@ -205,7 +205,29 @@ impl HandShakeInfo {
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
-        !unimplemented!()
+        let get_u32 =
+            |idx: usize| u32::from_be_bytes(raw[(idx * 4)..(idx + 1) * 4].try_into().unwrap());
+        let addr: IpAddr = {
+            if raw[36..48].iter().all(|b| *b == 0) {
+                let octets: [u8; 4] = raw[32..36].try_into().unwrap();
+                octets.into()
+            } else {
+                let octets: [u8; 16] = raw[32..48].try_into().unwrap();
+                octets.into()
+            }
+        };
+
+        Ok(Self {
+            udt_version: get_u32(0),
+            socket_type: get_u32(1).try_into()?,
+            initial_seq_number: get_u32(2).into(),
+            max_packet_size: get_u32(3),
+            max_window_size: get_u32(4),
+            connection_type: i32::from_be_bytes(raw[20..24].try_into().unwrap()),
+            socket_id: get_u32(6),
+            syn_cookie: get_u32(7),
+            ip_address: addr,
+        })
     }
 }
 
@@ -219,7 +241,28 @@ pub(crate) struct AckInfo {
 
 impl AckInfo {
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
-        !unimplemented!()
+        let get_u32 =
+            |idx: usize| u32::from_be_bytes(raw[(idx * 4)..(idx + 1) * 4].try_into().unwrap());
+
+        let next_seq_number: SeqNumber = get_u32(0).into();
+
+        if raw.len() <= 4 {
+            return Ok(Self {
+                next_seq_number,
+                info: None,
+            });
+        }
+        let info = AckOptionalInfo {
+            rtt: get_u32(1),
+            rtt_variance: get_u32(2),
+            available_buf_size: get_u32(3),
+            pack_recv_rate: get_u32(4),
+            link_capacity: get_u32(5),
+        };
+        Ok(Self {
+            next_seq_number,
+            info: Some(info),
+        })
     }
 }
 
@@ -240,7 +283,16 @@ pub(crate) struct NakInfo {
 
 impl NakInfo {
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
-        !unimplemented!()
+        let losses: Vec<u32> = raw
+            .chunks(4)
+            .filter_map(|chunk| {
+                if chunk.len() < 4 {
+                    return None;
+                }
+                Some(u32::from_be_bytes(chunk.try_into().unwrap()))
+            })
+            .collect();
+        Ok(Self { loss_info: losses })
     }
 }
 
@@ -252,6 +304,12 @@ pub(crate) struct DropRequestInfo {
 
 impl DropRequestInfo {
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
-        !unimplemented!()
+        let get_u32 =
+            |idx: usize| u32::from_be_bytes(raw[(idx * 4)..(idx + 1) * 4].try_into().unwrap());
+
+        Ok(Self {
+            first_seq_number: get_u32(0).into(),
+            last_seq_number: get_u32(1).into(),
+        })
     }
 }

@@ -57,7 +57,10 @@ impl UdtSndQueue {
                 }
                 if let Some(node) = self.sockets.write().await.pop() {
                     if let Some(socket) = node.socket().await {
-                        socket.write().await.send_next_packet().await?;
+                        if let Some((packet, ts)) = socket.write().await.next_data_packet().await? {
+                            self.insert(ts, node.socket_id).await;
+                            socket.read().await.send_packet(packet.into()).await?;
+                        }
                     }
                 }
             } else {

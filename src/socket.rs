@@ -28,6 +28,21 @@ pub enum SocketType {
     Datagram = 1,
 }
 
+impl TryFrom<u32> for SocketType {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(SocketType::Stream),
+            1 => Ok(SocketType::Datagram),
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                "unknown value for socket type",
+            )),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct UdtSocket {
     pub socket_id: SocketId,
@@ -83,7 +98,7 @@ impl UdtSocket {
             socket_id,
             socket_type,
             status: UdtStatus::Init,
-            initial_seq_number: initial_seq_number,
+            initial_seq_number,
             peer_addr: None,
             peer_socket_id: None,
             listen_socket: None,
@@ -116,7 +131,7 @@ impl UdtSocket {
             last_ack2_time: now,
             last_data_ack_processed: initial_seq_number,
             snd_loss_list: RcvLossList::new(configuration.flight_flag_size * 2),
-            configuration: configuration,
+            configuration,
         }
     }
 
@@ -200,7 +215,7 @@ impl UdtSocket {
         None
     }
 
-    pub(crate) async fn send_next_packet(&mut self) -> Result<Option<UdtPacket>> {
+    pub(crate) async fn next_data_packet(&mut self) -> Result<Option<(UdtDataPacket, Instant)>> {
         if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status) {
             return Err(Error::new(
                 ErrorKind::BrokenPipe,
@@ -269,7 +284,13 @@ impl UdtSocket {
             }
         };
 
-        Ok(None)
+        // update CC and stats
+        if probe {
+            return Ok(Some((packet, now)));
+        }
+
+        // TODO keep track of difference with target time
+        Ok(Some((packet, now + self.interpacket_interval)))
     }
 
     fn compute_cookie(&self, addr: &SocketAddr, offset: Option<isize>) -> u32 {
@@ -366,7 +387,9 @@ impl UdtSocket {
         self.last_rsp_time = now;
 
         match packet.packet_type {
-            ControlPacketType::Handshake(_) => (),
+            ControlPacketType::Handshake(_) => {
+                // TODO Handle repeated handshake
+            }
             ControlPacketType::KeepAlive => (),
             ControlPacketType::Ack(ref ack) => {
                 match &ack.info {
@@ -559,7 +582,7 @@ impl UdtSocket {
         }
     }
 
-    async fn send_packet(&self, packet: UdtPacket) -> Result<()> {
+    pub(crate) async fn send_packet(&self, packet: UdtPacket) -> Result<()> {
         if let Some(addr) = self.peer_addr {
             self.send_to(&addr, packet).await?;
         }

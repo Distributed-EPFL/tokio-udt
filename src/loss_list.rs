@@ -1,8 +1,6 @@
 use crate::seq_number::SeqNumber;
 use std::collections::BTreeMap;
 
-const MAX_SEQ_NUMBER: u32 = SeqNumber::MAX_NUMBER;
-
 #[derive(Debug)]
 pub(crate) struct RcvLossList {
     sequences: BTreeMap<SeqNumber, (SeqNumber, SeqNumber)>,
@@ -78,48 +76,48 @@ impl RcvLossList {
         }
     }
 
-    fn find(&self, n1: SeqNumber, n2: SeqNumber) -> bool {
-        if n1 > n2 {
-            return self.find(n1, SeqNumber::max()) || self.find(SeqNumber::zero(), n2);
-        }
+    // fn find(&self, n1: SeqNumber, n2: SeqNumber) -> bool {
+    //     if n1 > n2 {
+    //         return self.find(n1, SeqNumber::max()) || self.find(SeqNumber::zero(), n2);
+    //     }
 
-        if let Some((_, (_start, end))) = self.sequences.range(..n1).next_back() {
-            if *end >= n1 {
-                return true;
-            }
-        } else if let Some((_, (start, _end))) = self.sequences.range(n1..).next() {
-            if *start <= n2 {
-                return true;
-            }
-        }
-        false
-    }
+    //     if let Some((_, (_start, end))) = self.sequences.range(..n1).next_back() {
+    //         if *end >= n1 {
+    //             return true;
+    //         }
+    //     } else if let Some((_, (start, _end))) = self.sequences.range(n1..).next() {
+    //         if *start <= n2 {
+    //             return true;
+    //         }
+    //     }
+    //     false
+    // }
 
-    pub fn is_empty(&self) -> bool {
-        self.sequences.is_empty()
-    }
+    // pub fn is_empty(&self) -> bool {
+    //     self.sequences.is_empty()
+    // }
 
-    pub fn get_loss_array(&self, limit: usize) -> Vec<u32> {
-        let mut array: Vec<_> = self
-            .sequences
-            .values()
-            .flat_map(|(start, end)| {
-                if start == end {
-                    vec![start.number()]
-                } else {
-                    vec![start.number() | 0x8000000, end.number()]
-                }
-            })
-            .take(limit)
-            .collect();
+    // pub fn get_loss_array(&self, limit: usize) -> Vec<u32> {
+    //     let mut array: Vec<_> = self
+    //         .sequences
+    //         .values()
+    //         .flat_map(|(start, end)| {
+    //             if start == end {
+    //                 vec![start.number()]
+    //             } else {
+    //                 vec![start.number() | 0x8000000, end.number()]
+    //             }
+    //         })
+    //         .take(limit)
+    //         .collect();
 
-        if let Some(v) = array.last() {
-            if *v >= 0x8000000 {
-                array.pop();
-            }
-        }
-        array
-    }
+    //     if let Some(v) = array.last() {
+    //         if *v >= 0x8000000 {
+    //             array.pop();
+    //         }
+    //     }
+    //     array
+    // }
 
     pub fn pop_after(&mut self, after: SeqNumber) -> Option<SeqNumber> {
         if self.sequences.is_empty() {
@@ -132,12 +130,12 @@ impl RcvLossList {
             }
         }
         if let Some((_, (start, _end))) = self.sequences.range(after..).next() {
-            let start = start.clone();
+            let start = *start;
             self.remove(start);
             return Some(start);
         }
         if let Some((_, (start, _end))) = self.sequences.iter().next() {
-            let start = start.clone();
+            let start = *start;
             self.remove(start);
             return Some(start);
         }

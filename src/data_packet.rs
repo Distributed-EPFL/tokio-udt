@@ -17,6 +17,12 @@ impl UdtDataPacket {
     pub fn payload_len(&self) -> u32 {
         self.data.len() as u32
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buffer: Vec<u8> = self.header.serialize();
+        buffer.extend_from_slice(&self.data);
+        buffer
+    }
 }
 
 #[derive(Debug)]
@@ -53,14 +59,28 @@ impl UdtDataPacketHeader {
             dest_socket_id,
         })
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buffer: Vec<u8> = Vec::with_capacity(16);
+        buffer.extend_from_slice(&self.seq_number.number().to_be_bytes());
+
+        let block: u32 = ((self.position as u32) << 30)
+            + ((self.in_order as u32) << 29)
+            + self.msg_number.number();
+
+        buffer.extend_from_slice(&block.to_be_bytes());
+        buffer.extend_from_slice(&self.timestamp.to_be_bytes());
+        buffer.extend_from_slice(&self.dest_socket_id.to_be_bytes());
+        buffer
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PacketPosition {
-    First,
-    Last,
-    Only,
-    Middle,
+    First = 2,
+    Last = 1,
+    Only = 3,
+    Middle = 0,
 }
 
 impl TryFrom<u8> for PacketPosition {

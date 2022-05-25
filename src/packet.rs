@@ -21,7 +21,7 @@ impl UdtPacket {
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             Self::Control(p) => p.serialize(),
-            Self::Data(p) => unimplemented!(), // TODO
+            Self::Data(p) => p.serialize(),
         }
     }
 
