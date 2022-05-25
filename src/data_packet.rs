@@ -8,9 +8,9 @@ pub(crate) struct UdtDataPacket {
 }
 
 impl UdtDataPacket {
-    pub fn deserialize(mut raw: Vec<u8>) -> Result<Self> {
+    pub fn deserialize(raw: &[u8]) -> Result<Self> {
         let header = UdtDataPacketHeader::deserialize(&raw[..16])?;
-        let data = raw.drain(16..).collect();
+        let data = raw[16..].into();
         Ok(Self { header, data })
     }
 

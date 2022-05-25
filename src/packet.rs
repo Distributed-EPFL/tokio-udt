@@ -25,7 +25,7 @@ impl UdtPacket {
         }
     }
 
-    pub fn deserialize(raw: Vec<u8>) -> Result<Self> {
+    pub fn deserialize(raw: &[u8]) -> Result<Self> {
         if raw.is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -35,7 +35,7 @@ impl UdtPacket {
         let first_bit = (raw[0] >> 7) != 0;
         let packet = match first_bit {
             false => Self::Data(UdtDataPacket::deserialize(raw)?),
-            true => Self::Control(UdtControlPacket::deserialize(&raw)?),
+            true => Self::Control(UdtControlPacket::deserialize(raw)?),
         };
         Ok(packet)
     }

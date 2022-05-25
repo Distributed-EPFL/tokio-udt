@@ -191,12 +191,11 @@ impl UdtSocket {
             self.peer_socket_id.expect("peer_socket_id not defined"),
         );
 
-        self.send_packet(packet.into()).await?;
-        // if let Some(lock) = self.multiplexer.upgrade() {
-        //     let mut mux = lock.write().await;
-        //     mux.rcv_queue.push_back(self.socket_id);
-        //     mux.send_to(&peer, packet.into()).await?;
-        // }
+        if let Some(lock) = self.multiplexer.upgrade() {
+            let mux = lock.read().await;
+            mux.rcv_queue.push_back(self.socket_id).await;
+            mux.send_to(&peer, packet.into()).await?;
+        }
 
         let socket = Arc::new(RwLock::new(self));
         Ok(socket)
@@ -618,7 +617,7 @@ impl UdtSocket {
             ));
         }
 
-        if data.len() <= 0 {
+        if data.is_empty() {
             return Ok(());
         }
 
