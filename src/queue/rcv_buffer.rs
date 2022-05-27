@@ -40,4 +40,16 @@ impl RcvBuffer {
         self.packets
             .retain(|_k, packet| packet.header.msg_number != msg);
     }
+
+    pub fn ack_data(&mut self, from: SeqNumber, to: SeqNumber) {
+        if from > to {
+            self.ack_data(from, SeqNumber::max());
+            self.ack_data(SeqNumber::zero(), to);
+            return;
+        }
+        let keys: Vec<_> = self.packets.range(from..to).map(|(k, _)| *k).collect();
+        for key in keys {
+            self.packets.remove(&key);
+        }
+    }
 }

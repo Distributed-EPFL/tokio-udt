@@ -65,6 +65,34 @@ impl UdtControlPacket {
         }
     }
 
+    pub fn new_keep_alive(dest_socket_id: SocketId) -> Self {
+        Self {
+            packet_type: ControlPacketType::KeepAlive,
+            dest_socket_id,
+            additional_info: 0,
+            reserved: 0,
+            timestamp: 0,
+        }
+    }
+
+    pub fn new_ack(
+        ack_number: AckSeqNumber,
+        next_seq_number: SeqNumber,
+        dest_socket_id: SocketId,
+        info: Option<AckOptionalInfo>,
+    ) -> Self {
+        Self {
+            packet_type: ControlPacketType::Ack(AckInfo {
+                next_seq_number,
+                info,
+            }),
+            dest_socket_id,
+            additional_info: ack_number.number(),
+            reserved: 0,
+            timestamp: 0,
+        }
+    }
+
     pub fn ack_seq_number(&self) -> Option<AckSeqNumber> {
         match self.packet_type {
             ControlPacketType::Ack(_) => Some(self.additional_info.into()),

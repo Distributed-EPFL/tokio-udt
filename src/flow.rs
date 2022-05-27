@@ -11,6 +11,8 @@ pub(crate) struct UdtFlow {
     probe_window: VecDeque<Duration>,
     last_arrival_time: Instant,
     probe_time: Instant,
+    pub rtt: Duration,
+    pub rtt_var: Duration,
 }
 
 impl Default for UdtFlow {
@@ -21,6 +23,8 @@ impl Default for UdtFlow {
             arrival_window: VecDeque::new(),
             probe_time: now,
             probe_window: VecDeque::new(),
+            rtt: Duration::from_millis(100),
+            rtt_var: Duration::from_millis(50),
         }
     }
 }

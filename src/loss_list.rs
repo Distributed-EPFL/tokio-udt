@@ -93,9 +93,9 @@ impl RcvLossList {
     //     false
     // }
 
-    // pub fn is_empty(&self) -> bool {
-    //     self.sequences.is_empty()
-    // }
+    pub fn is_empty(&self) -> bool {
+        self.sequences.is_empty()
+    }
 
     // pub fn get_loss_array(&self, limit: usize) -> Vec<u32> {
     //     let mut array: Vec<_> = self
@@ -138,6 +138,24 @@ impl RcvLossList {
             let start = *start;
             self.remove(start);
             return Some(start);
+        }
+        None
+    }
+
+    pub fn peek_after(&self, after: SeqNumber) -> Option<SeqNumber> {
+        if self.sequences.is_empty() {
+            return None;
+        }
+        if let Some((_, (_start, end))) = self.sequences.range(..=after).next_back() {
+            if *end >= after {
+                return Some(after);
+            }
+        }
+        if let Some((_, (start, _end))) = self.sequences.range(after..).next() {
+            return Some(*start);
+        }
+        if let Some((_, (start, _end))) = self.sequences.iter().next() {
+            return Some(*start);
         }
         None
     }
