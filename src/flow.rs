@@ -13,6 +13,8 @@ pub(crate) struct UdtFlow {
     probe_time: Instant,
     pub rtt: Duration,
     pub rtt_var: Duration,
+    pub peer_bandwidth: u32,
+    pub peer_delivery_rate: u32,
 }
 
 impl Default for UdtFlow {
@@ -25,6 +27,8 @@ impl Default for UdtFlow {
             probe_window: VecDeque::new(),
             rtt: Duration::from_millis(100),
             rtt_var: Duration::from_millis(50),
+            peer_bandwidth: 1,
+            peer_delivery_rate: 16,
         }
     }
 }
@@ -51,7 +55,7 @@ impl UdtFlow {
     }
 
     /// Returns a number of packets per second
-    pub fn get_pkt_rcv_speed(&self) -> usize {
+    pub fn get_pkt_rcv_speed(&self) -> u32 {
         let length = self.arrival_window.len();
         let mut values = self.arrival_window.clone();
         let (_, median, _) = values.make_contiguous().select_nth_unstable(length / 2);
@@ -64,10 +68,10 @@ impl UdtFlow {
             return 0;
         }
         let total_duration: Duration = values.iter().sum();
-        (values.len() as f64 / total_duration.as_secs_f64()).ceil() as usize
+        (values.len() as f64 / total_duration.as_secs_f64()).ceil() as u32
     }
 
-    pub fn get_bandwidth(&self) -> usize {
+    pub fn get_bandwidth(&self) -> u32 {
         let length = self.probe_window.len();
         let mut values = self.probe_window.clone();
         let (_, median, _) = values.make_contiguous().select_nth_unstable(length / 2);
@@ -80,6 +84,22 @@ impl UdtFlow {
         if total_duration.is_zero() {
             return 0;
         }
-        (values.len() as f64 / total_duration.as_secs_f64()).ceil() as usize
+        (values.len() as f64 / total_duration.as_secs_f64()).ceil() as u32
+    }
+
+    pub fn update_rtt(&mut self, new_val: Duration) {
+        self.rtt = (7 * self.rtt + new_val) / 8;
+    }
+
+    pub fn update_rtt_var(&mut self, new_val: Duration) {
+        self.rtt_var = (3 * self.rtt_var + new_val) / 4;
+    }
+
+    pub fn update_bandwidth(&mut self, new_val: u32) {
+        self.peer_bandwidth = (7 * self.peer_bandwidth + new_val) / 8;
+    }
+
+    pub fn update_peer_delivery_rate(&mut self, new_val: u32) {
+        self.peer_delivery_rate = (7 * self.peer_delivery_rate + new_val) / 8;
     }
 }

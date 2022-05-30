@@ -1,6 +1,6 @@
 use crate::ack_window::AckWindow;
 use crate::configuration::UdtConfiguration;
-use crate::control_packet::{ControlPacketType, HandShakeInfo, UdtControlPacket};
+use crate::control_packet::{AckOptionalInfo, ControlPacketType, HandShakeInfo, UdtControlPacket};
 use crate::data_packet::UdtDataPacket;
 use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::loss_list::RcvLossList;
@@ -19,7 +19,6 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 
 const SYN_INTERVAL: Duration = Duration::from_millis(10);
-const MIN_NAK_INTERVAL: Duration = Duration::from_millis(300);
 const MIN_EXP_INTERVAL: Duration = Duration::from_millis(300);
 const ACK_INTERVAL: Duration = SYN_INTERVAL;
 const PACKETS_BETWEEN_LIGHT_ACK: usize = 64;
@@ -73,6 +72,7 @@ pub struct UdtSocket {
 
     // Receiving related,
     last_sent_ack: SeqNumber,
+    last_sent_ack_time: Instant,
     curr_rcv_seq_number: SeqNumber,
     last_ack_seq_number: AckSeqNumber,
     rcv_loss_list: RcvLossList,
@@ -87,7 +87,6 @@ pub struct UdtSocket {
     snd_loss_list: RcvLossList,
 
     next_ack_time: Instant,
-    next_nak_time: Instant,
     interpacket_interval: Duration,
     ack_packet_counter: usize,
     light_ack_counter: usize,
@@ -126,7 +125,6 @@ impl UdtSocket {
             curr_rcv_seq_number: initial_seq_number - 1,
 
             next_ack_time: now + SYN_INTERVAL,
-            next_nak_time: now + MIN_NAK_INTERVAL,
             interpacket_interval: Duration::from_micros(10),
             ack_packet_counter: 0,
             light_ack_counter: 0,
@@ -134,6 +132,7 @@ impl UdtSocket {
             exp_count: 1,
             last_ack_received: initial_seq_number - 1,
             last_sent_ack: initial_seq_number - 1,
+            last_sent_ack_time: now,
             last_ack2_received: initial_seq_number.number().into(),
 
             curr_snd_seq_number: initial_seq_number - 1,
@@ -450,6 +449,17 @@ impl UdtSocket {
                         // TODO record times for monitoring purposes
                         self.last_data_ack_processed = seq;
                         self.update_snd_queue(false).await;
+
+                        self.flow
+                            .update_rtt(Duration::from_millis(extra.rtt.into()));
+                        self.flow
+                            .update_rtt_var(Duration::from_millis(extra.rtt_variance.into()));
+                        if extra.pack_recv_rate > 0 {
+                            self.flow.update_peer_delivery_rate(extra.pack_recv_rate);
+                        }
+                        if extra.link_capacity > 0 {
+                            self.flow.update_bandwidth(extra.link_capacity);
+                        }
                         // TODO: CCC
                     }
                 }
@@ -464,8 +474,8 @@ impl UdtSocket {
                             self.flow.rtt - rtt
                         }
                     };
-                    self.flow.rtt_var = (3 * self.flow.rtt_var + rtt_abs_diff) / 4;
-                    self.flow.rtt = (7 * self.flow.rtt + rtt) / 8;
+                    self.flow.update_rtt_var(rtt_abs_diff);
+                    self.flow.update_rtt(rtt);
                     if (seq - self.last_ack2_received) > 0 {
                         self.last_ack2_received = seq;
                     }
@@ -622,19 +632,47 @@ impl UdtSocket {
             return Ok(());
         }
 
-        let now = Instant::now();
         let to_ack = seq_number - self.last_sent_ack;
         if to_ack > 0 {
             self.rcv_buffer.ack_data(self.last_sent_ack, seq_number - 1);
             self.last_sent_ack = seq_number;
 
             // TODO: notify recv ?
+        } else if seq_number == self.last_sent_ack {
+            if self.last_sent_ack_time.elapsed() < (self.flow.rtt + 4 * self.flow.rtt_var) {
+                return Ok(());
+            }
+        } else {
+            return Ok(());
         }
-        // else {
 
-        // }
+        if (self.last_sent_ack - self.last_ack2_received) > 0 {
+            self.last_ack_seq_number = self.last_ack_seq_number + 1;
+            let mut ack_info = AckOptionalInfo {
+                rtt: self.flow.rtt.as_micros().try_into().unwrap_or(u32::MAX),
+                rtt_variance: self.flow.rtt_var.as_micros().try_into().unwrap_or(u32::MAX),
+                available_buf_size: std::cmp::max(self.rcv_buffer.get_available_buf_size(), 2),
+                // TODO: use rcv_time_window to keep track of bandwidth / recv speed
+                pack_recv_rate: 0,
+                link_capacity: 0,
+            };
+            if self.last_sent_ack_time.elapsed() > SYN_INTERVAL {
+                ack_info.pack_recv_rate = self.flow.get_pkt_rcv_speed();
+                ack_info.link_capacity = self.flow.get_bandwidth();
+                self.last_sent_ack_time = Instant::now();
+            }
+            let ack_packet = UdtControlPacket::new_ack(
+                self.last_ack_seq_number,
+                self.last_sent_ack,
+                self.peer_socket_id.unwrap(),
+                Some(ack_info),
+            );
+            self.send_packet(ack_packet.into()).await?;
+            self.ack_window
+                .store(self.last_sent_ack, self.last_ack_seq_number);
+        }
 
-        unimplemented!()
+        Ok(())
     }
 
     fn cc_update(&mut self) {
