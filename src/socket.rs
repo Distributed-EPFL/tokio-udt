@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio::time::{Duration, Instant};
 
 const SYN_INTERVAL: Duration = Duration::from_millis(10);
@@ -77,6 +77,7 @@ pub struct UdtSocket {
     last_ack_seq_number: AckSeqNumber,
     rcv_loss_list: RcvLossList,
     last_ack2_received: SeqNumber,
+    rcv_notify: Notify,
 
     // Sending related
     last_ack_received: SeqNumber,
@@ -97,9 +98,13 @@ pub struct UdtSocket {
 }
 
 impl UdtSocket {
-    pub(crate) fn new(socket_id: SocketId, socket_type: SocketType) -> Self {
+    pub(crate) fn new(
+        socket_id: SocketId,
+        socket_type: SocketType,
+        isn: Option<SeqNumber>,
+    ) -> Self {
         let now = Instant::now();
-        let initial_seq_number = SeqNumber::random();
+        let initial_seq_number = isn.unwrap_or_else(SeqNumber::random);
         let configuration = UdtConfiguration::default();
         Self {
             socket_id,
@@ -114,7 +119,7 @@ impl UdtSocket {
             backlog_size: 0,
             multiplexer: Weak::new(),
             snd_buffer: SndBuffer::new(configuration.mss),
-            rcv_buffer: RcvBuffer::new(configuration.rcv_buf_size),
+            rcv_buffer: RcvBuffer::new(configuration.rcv_buf_size, initial_seq_number),
             flow: UdtFlow::default(),
             flow_window_size: 0,
             self_ip: None,
@@ -142,6 +147,7 @@ impl UdtSocket {
             snd_loss_list: RcvLossList::new(configuration.flight_flag_size * 2),
             ack_window: AckWindow::new(1024),
             configuration,
+            rcv_notify: Notify::new(),
         }
     }
 
@@ -161,13 +167,7 @@ impl UdtSocket {
         self
     }
 
-    pub fn with_initial_seq_number(mut self, isn: SeqNumber) -> Self {
-        self.initial_seq_number = isn;
-        self
-    }
-
     pub fn open(&mut self) {
-        // TODO: init packet_size, payload_size, etc.
         self.status = UdtStatus::Opened;
     }
 
@@ -634,10 +634,9 @@ impl UdtSocket {
 
         let to_ack = seq_number - self.last_sent_ack;
         if to_ack > 0 {
-            self.rcv_buffer.ack_data(self.last_sent_ack, seq_number - 1);
+            self.rcv_buffer.ack_data(seq_number);
             self.last_sent_ack = seq_number;
-
-            // TODO: notify recv ?
+            self.rcv_notify.notify_waiters();
         } else if seq_number == self.last_sent_ack {
             if self.last_sent_ack_time.elapsed() < (self.flow.rtt + 4 * self.flow.rtt_var) {
                 return Ok(());
@@ -749,7 +748,7 @@ impl UdtSocket {
         }
     }
 
-    pub async fn send(&mut self, data: Vec<u8>) -> Result<()> {
+    pub async fn send(&mut self, data: &[u8]) -> Result<()> {
         if self.socket_type != SocketType::Stream {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -776,6 +775,56 @@ impl UdtSocket {
         self.snd_buffer.add_message(data, None, false);
         self.update_snd_queue(false).await;
         Ok(())
+    }
+
+    pub async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        if self.socket_type != SocketType::Stream {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot recv on non-stream socket",
+            ));
+        }
+        if self.status == UdtStatus::Broken || self.status == UdtStatus::Closing {
+            if !self.rcv_buffer.has_data_to_read() {
+                return Err(Error::new(
+                    ErrorKind::BrokenPipe,
+                    "connection was closed or broken",
+                ));
+            }
+        } else if self.status != UdtStatus::Connected {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "UDT socket not connected",
+            ));
+        }
+
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        if !self.rcv_buffer.has_data_to_read() {
+            self.rcv_notify.notified().await;
+        }
+
+        if self.status == UdtStatus::Broken || self.status == UdtStatus::Closing {
+            if !self.rcv_buffer.has_data_to_read() {
+                return Err(Error::new(
+                    ErrorKind::BrokenPipe,
+                    "connection was closed or broken",
+                ));
+            }
+        } else if self.status != UdtStatus::Connected {
+            return Err(Error::new(
+                ErrorKind::NotConnected,
+                "UDT socket not connected",
+            ));
+        }
+
+        let written = self.rcv_buffer.read_buffer(buf);
+
+        // TODO: handle UDT timeout
+
+        Ok(written)
     }
 }
 

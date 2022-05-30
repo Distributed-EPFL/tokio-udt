@@ -74,7 +74,7 @@ impl Udt {
     }
 
     pub fn new_socket(&'static mut self, socket_type: SocketType) -> Result<&'static SocketRef> {
-        let socket = UdtSocket::new(self.get_new_socket_id(), socket_type);
+        let socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
             return Ok(e.insert(Arc::new(RwLock::new(socket))));
@@ -131,10 +131,10 @@ impl Udt {
                 return Err(Error::new(ErrorKind::Other, "Too many queued sockets"));
             }
 
-            let mut new_socket = UdtSocket::new(new_socket_id, hs.socket_type)
-                .with_peer(peer, hs.socket_id)
-                .with_listen_socket(listener_socket_id, multiplexer)
-                .with_initial_seq_number(hs.initial_seq_number);
+            let mut new_socket =
+                UdtSocket::new(new_socket_id, hs.socket_type, Some(hs.initial_seq_number))
+                    .with_peer(peer, hs.socket_id)
+                    .with_listen_socket(listener_socket_id, multiplexer);
             new_socket.open();
             new_socket
         };
@@ -168,8 +168,7 @@ impl Udt {
         }
 
         self.update_mux(&mut socket, addr).await?;
-        // TODO: continue
-
+        socket.open();
         Ok(())
     }
 

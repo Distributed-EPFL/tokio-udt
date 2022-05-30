@@ -61,7 +61,7 @@ impl SndBuffer {
         }
     }
 
-    pub fn add_message(&mut self, data: Vec<u8>, ttl: Option<u64>, in_order: bool) {
+    pub fn add_message(&mut self, data: &[u8], ttl: Option<u64>, in_order: bool) {
         let msg_number = self.next_msg_number;
         let now = Instant::now();
         let chunks = data.chunks(self.mss as usize);
