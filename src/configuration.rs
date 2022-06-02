@@ -18,7 +18,7 @@ pub struct UdtConfiguration {
     // rcv_timeout
     // socktype
     // ip_version
-    // rendezvous: bool
+    pub rendezvous: bool,
 }
 
 impl UdtConfiguration {
@@ -40,6 +40,7 @@ impl Default for UdtConfiguration {
             udp_rcv_buf_size: DEFAULT_MSS as u32 * DEFAULT_UDT_BUF_SIZE,
             linger_timeout: Some(180),
             reuse_addr: true,
+            rendezvous: false,
         }
     }
 }

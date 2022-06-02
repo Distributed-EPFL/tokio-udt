@@ -1,9 +1,11 @@
 mod ack_window;
 mod common;
 mod configuration;
+mod connection;
 mod control_packet;
 mod data_packet;
 mod flow;
+mod listener;
 mod loss_list;
 mod multiplexer;
 mod packet;
@@ -12,7 +14,8 @@ mod seq_number;
 mod socket;
 mod udt;
 
-pub use socket::UdtSocket;
+pub use connection::UdtConnection;
+pub use listener::UdtListener;
 pub use udt::Udt;
 
 #[cfg(test)]

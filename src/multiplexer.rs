@@ -24,7 +24,30 @@ pub struct UdtMultiplexer {
 }
 
 impl UdtMultiplexer {
-    pub async fn bind(
+    pub(crate) async fn new(
+        id: MultiplexerId,
+        config: &UdtConfiguration,
+    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer>>)> {
+        let channel = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        let port = channel.local_addr()?.port();
+        let mux = Self {
+            id,
+            port,
+            reusable: config.reuse_addr,
+            mss: config.mss,
+            channel: channel.clone(),
+            snd_queue: UdtSndQueue::new(),
+            rcv_queue: UdtRcvQueue::new(channel, config.mss),
+            listener: None,
+        };
+
+        let lock = Arc::new(RwLock::new(mux));
+        let mut mux = lock.clone().write_owned().await;
+        mux.rcv_queue.set_multiplexer(&lock);
+        Ok((id, lock))
+    }
+
+    pub(crate) async fn bind(
         id: MultiplexerId,
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
@@ -45,10 +68,9 @@ impl UdtMultiplexer {
         };
 
         let lock = Arc::new(RwLock::new(mux));
-        let lock2 = lock.clone();
-        let mut mux = lock.write_owned().await;
-        mux.rcv_queue.set_multiplexer(&lock2);
-        Ok((id, lock2))
+        let mut mux = lock.clone().write_owned().await;
+        mux.rcv_queue.set_multiplexer(&lock);
+        Ok((id, lock))
     }
 
     pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {

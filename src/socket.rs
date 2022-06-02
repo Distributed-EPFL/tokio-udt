@@ -50,16 +50,16 @@ impl TryFrom<u32> for SocketType {
 pub struct UdtSocket {
     pub socket_id: SocketId,
     pub status: UdtStatus,
-    socket_type: SocketType,
+    pub socket_type: SocketType,
     listen_socket: Option<SocketId>,
     pub peer_addr: Option<SocketAddr>,
     pub peer_socket_id: Option<SocketId>,
     pub initial_seq_number: SeqNumber,
 
-    pub queued_sockets: BTreeSet<SocketId>,
-    pub accepted_socket: BTreeSet<SocketId>,
-    pub backlog_size: usize,
-    pub multiplexer: Weak<RwLock<UdtMultiplexer>>,
+    pub(crate) queued_sockets: BTreeSet<SocketId>,
+    pub(crate) accept_notify: Notify,
+    pub(crate) backlog_size: usize,
+    pub(crate) multiplexer: Weak<RwLock<UdtMultiplexer>>,
     pub configuration: UdtConfiguration,
 
     rcv_buffer: RcvBuffer,
@@ -115,7 +115,7 @@ impl UdtSocket {
             peer_socket_id: None,
             listen_socket: None,
             queued_sockets: BTreeSet::new(),
-            accepted_socket: BTreeSet::new(),
+            accept_notify: Notify::new(),
             backlog_size: 0,
             multiplexer: Weak::new(),
             snd_buffer: SndBuffer::new(configuration.mss),
@@ -825,6 +825,42 @@ impl UdtSocket {
         // TODO: handle UDT timeout
 
         Ok(written)
+    }
+
+    pub(crate) async fn connect(&mut self, addr: SocketAddr) -> Result<()> {
+        if self.status != UdtStatus::Init {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                format!("expected status Init, found {:?}", self.status),
+            ));
+        }
+
+        self.open();
+        let mut udt = Udt::get().write().await;
+        udt.update_mux(self, None).await?;
+
+        self.status = UdtStatus::Connecting;
+        self.peer_addr = Some(addr);
+
+        // TODO: use rendezvous queue?
+
+        let hs = HandShakeInfo {
+            udt_version: self.configuration.udt_version(),
+            initial_seq_number: self.initial_seq_number,
+            max_packet_size: self.configuration.mss,
+            max_window_size: std::cmp::min(
+                self.flow_window_size,
+                self.rcv_buffer.get_available_buf_size(),
+            ),
+            connection_type: 1,
+            socket_type: self.socket_type,
+            socket_id: self.socket_id,
+            ip_address: addr.ip(),
+            syn_cookie: 0,
+        };
+        let hs_packet = UdtControlPacket::new_handshake(hs, 0);
+        self.send_to(&addr, hs_packet.into()).await?;
+        Ok(())
     }
 }
 

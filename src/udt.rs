@@ -21,7 +21,7 @@ pub struct Udt {
     // closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Arc<RwLock<UdtMultiplexer>>>,
     next_socket_id: SocketId,
-    configuration: UdtConfiguration,
+    pub configuration: UdtConfiguration,
     peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketId>>, // peer socket id -> local socket id
 }
 
@@ -73,7 +73,7 @@ impl Udt {
         None
     }
 
-    pub fn new_socket(&'static mut self, socket_type: SocketType) -> Result<&'static SocketRef> {
+    pub fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
         let socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
@@ -148,14 +148,18 @@ impl Udt {
             .or_default()
             .insert(new_socket_ref.read().await.socket_id);
         self.sockets.insert(ns_id, new_socket_ref);
-        listener_socket.write().await.queued_sockets.insert(ns_id);
 
-        // TODO: Trigger event? Unblock "accept" in listener socket?
+        {
+            let mut listener_socket = listener_socket.write().await;
+            listener_socket.queued_sockets.insert(ns_id);
+            listener_socket.accept_notify.notify_one();
+        }
 
+        // TODO: Trigger event?
         Ok(())
     }
 
-    pub async fn bind(&'static mut self, socket_id: SocketId, addr: SocketAddr) -> Result<()> {
+    pub async fn bind(&mut self, socket_id: SocketId, addr: SocketAddr) -> Result<()> {
         let socket = self
             .get_socket(socket_id)
             .await
@@ -167,30 +171,35 @@ impl Udt {
             return Err(Error::new(ErrorKind::Other, "socket already binded"));
         }
 
-        self.update_mux(&mut socket, addr).await?;
+        self.update_mux(&mut socket, Some(addr)).await?;
         socket.open();
         Ok(())
     }
 
     pub(crate) async fn update_mux(
-        &'static mut self,
+        &mut self,
         socket: &mut UdtSocket,
-        bind_addr: SocketAddr,
+        bind_addr: Option<SocketAddr>,
     ) -> Result<()> {
         if self.configuration.reuse_addr {
-            let port = bind_addr.port();
-            for m in self.multiplexers.values() {
-                let mux = m.read().await;
-                if mux.reusable && mux.port == port && mux.mss == socket.configuration.mss {
-                    socket.set_multiplexer(m);
-                    return Ok(());
+            if let Some(bind_addr) = bind_addr {
+                let port = bind_addr.port();
+                for m in self.multiplexers.values() {
+                    let mux = m.read().await;
+                    if mux.reusable && mux.port == port && mux.mss == socket.configuration.mss {
+                        socket.set_multiplexer(m);
+                        return Ok(());
+                    }
                 }
             }
         }
 
         // A new multiplexer is needed
-        let (mux_id, mux) =
-            UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?;
+        let (mux_id, mux) = if let Some(bind_addr) = bind_addr {
+            UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?
+        } else {
+            UdtMultiplexer::new(socket.socket_id, &socket.configuration).await?
+        };
         self.multiplexers.insert(mux_id, mux.clone());
         socket.set_multiplexer(&mux);
         tokio::spawn(async move {
