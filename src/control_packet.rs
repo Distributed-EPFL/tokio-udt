@@ -112,7 +112,7 @@ impl UdtControlPacket {
 
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::with_capacity(8);
-        buffer.extend_from_slice(&(0xf000 + self.packet_type.type_as_u15()).to_be_bytes());
+        buffer.extend_from_slice(&(0x8000 + self.packet_type.type_as_u15()).to_be_bytes());
         buffer.extend_from_slice(&self.reserved.to_be_bytes());
         buffer.extend_from_slice(&self.additional_info.to_be_bytes());
         buffer.extend_from_slice(&self.timestamp.to_be_bytes());

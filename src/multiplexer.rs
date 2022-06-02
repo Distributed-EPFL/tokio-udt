@@ -28,7 +28,7 @@ impl UdtMultiplexer {
         id: MultiplexerId,
         config: &UdtConfiguration,
     ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer>>)> {
-        let channel = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        let channel = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
         let port = channel.local_addr()?.port();
         let mux = Self {
             id,

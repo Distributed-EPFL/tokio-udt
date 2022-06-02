@@ -86,10 +86,15 @@ impl UdtRcvQueue {
 
                     if let Some(socket) = Udt::get().read().await.get_socket(socket_id).await {
                         let mut socket = socket.write().await;
-                        if socket.peer_addr == Some(addr) && socket.status == UdtStatus::Connected {
+                        if socket.peer_addr == Some(addr)
+                            && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
+                                .contains(&socket.status)
+                        {
                             socket.process_packet(packet).await?;
                             socket.check_timers().await;
                             self.update(socket_id).await;
+                        } else {
+                            eprintln!("Ignoring packet {:?}", packet);
                         }
                     } else {
                         eprintln!("socket not found for socket_id {}", socket_id);

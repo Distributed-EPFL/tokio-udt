@@ -9,7 +9,7 @@ pub struct UdtListener {
 }
 
 impl UdtListener {
-    pub async fn new(bind_addr: SocketAddr, backlog: usize) -> Result<Self> {
+    pub async fn bind(bind_addr: SocketAddr, backlog: usize) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
             udt.new_socket(SocketType::Stream)?.clone()
@@ -46,29 +46,34 @@ impl UdtListener {
     }
 
     pub async fn accept(&self) -> Result<(SocketAddr, UdtConnection)> {
-        let socket = self.socket.read().await;
-        if socket.configuration.rendezvous {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "no 'accept' in rendezvous connection setup",
-            ));
+        {
+            let socket = self.socket.read().await;
+            if socket.configuration.rendezvous {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "no 'accept' in rendezvous connection setup",
+                ));
+            }
         }
 
         let accepted_socket_id = loop {
-            let mut socket = self.socket.write().await;
-            if socket.status != UdtStatus::Listening {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    "socket is not in listening state",
-                ));
-            }
+            {
+                let mut socket = self.socket.write().await;
+                if socket.status != UdtStatus::Listening {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        "socket is not in listening state",
+                    ));
+                }
 
-            if let Some(socket_id) = socket.queued_sockets.iter().next() {
-                let socket_id = *socket_id;
-                socket.queued_sockets.remove(&socket_id);
-                break socket_id;
-            }
+                println!("Nb queued_sockets: {}", socket.queued_sockets.len());
 
+                if let Some(socket_id) = socket.queued_sockets.iter().next() {
+                    let socket_id = *socket_id;
+                    socket.queued_sockets.remove(&socket_id);
+                    break socket_id;
+                }
+            }
             {
                 let socket = self.socket.read().await;
                 socket.accept_notify.notified().await;

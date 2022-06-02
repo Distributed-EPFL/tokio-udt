@@ -13,8 +13,10 @@ impl UdtConnection {
     }
 
     pub async fn connect(addr: SocketAddr) -> Result<Self> {
-        let mut udt = Udt::get().write().await;
-        let socket: &SocketRef = udt.new_socket(SocketType::Stream)?;
+        let socket = {
+            let mut udt = Udt::get().write().await;
+            udt.new_socket(SocketType::Stream)?.clone()
+        };
         {
             let mut socket = socket.write().await;
             socket.connect(addr).await?;

@@ -398,8 +398,15 @@ impl UdtSocket {
         self.last_rsp_time = now;
 
         match packet.packet_type {
-            ControlPacketType::Handshake(_) => {
-                // TODO Handle repeated handshake
+            ControlPacketType::Handshake(hs) => {
+                // TODO: handle rendezvous mode
+                if hs.connection_type > 0 {
+                    let mut hs = hs.clone();
+                    hs.connection_type = -1;
+                    hs.socket_id = self.socket_id;
+                    let hs_packet = UdtControlPacket::new_handshake(hs, 0);
+                    self.send_packet(hs_packet.into()).await?;
+                }
             }
             ControlPacketType::KeepAlive => (),
             ControlPacketType::Ack(ref ack) => {
@@ -860,6 +867,7 @@ impl UdtSocket {
         };
         let hs_packet = UdtControlPacket::new_handshake(hs, 0);
         self.send_to(&addr, hs_packet.into()).await?;
+
         Ok(())
     }
 }
