@@ -27,13 +27,13 @@ impl UdtConnection {
     }
 
     pub async fn send(&self, msg: &[u8]) -> Result<()> {
-        let mut socket = self.socket.write().await;
+        let socket = self.socket.read().await;
         socket.send(msg).await?;
         Ok(())
     }
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize> {
-        let mut socket = self.socket.write().await;
+        let socket = self.socket.read().await;
         let nbytes = socket.recv(buf).await?;
         Ok(nbytes)
     }

@@ -7,6 +7,8 @@ pub const PROBE_MODULO: u32 = 16;
 
 #[derive(Debug)]
 pub(crate) struct UdtFlow {
+    pub flow_window_size: u32,
+
     arrival_window: VecDeque<Duration>,
     probe_window: VecDeque<Duration>,
     last_arrival_time: Instant,
@@ -21,6 +23,7 @@ impl Default for UdtFlow {
     fn default() -> Self {
         let now = Instant::now();
         Self {
+            flow_window_size: 0,
             last_arrival_time: now,
             arrival_window: VecDeque::new(),
             probe_time: now,
@@ -72,6 +75,9 @@ impl UdtFlow {
     }
 
     pub fn get_bandwidth(&self) -> u32 {
+        if self.probe_window.is_empty() {
+            return 0;
+        }
         let length = self.probe_window.len();
         let mut values = self.probe_window.clone();
         let (_, median, _) = values.make_contiguous().select_nth_unstable(length / 2);

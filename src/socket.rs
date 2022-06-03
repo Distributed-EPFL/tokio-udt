@@ -1,13 +1,12 @@
-use crate::ack_window::AckWindow;
 use crate::configuration::UdtConfiguration;
 use crate::control_packet::{AckOptionalInfo, ControlPacketType, HandShakeInfo, UdtControlPacket};
 use crate::data_packet::UdtDataPacket;
 use crate::flow::{UdtFlow, PROBE_MODULO};
-use crate::loss_list::RcvLossList;
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
 use crate::queue::{RcvBuffer, SndBuffer};
-use crate::seq_number::{AckSeqNumber, SeqNumber};
+use crate::seq_number::SeqNumber;
+use crate::state::SocketState;
 use crate::udt::{SocketRef, Udt};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
@@ -18,7 +17,7 @@ use tokio::io::{Error, ErrorKind, Result};
 use tokio::sync::{Notify, RwLock};
 use tokio::time::{Duration, Instant};
 
-const SYN_INTERVAL: Duration = Duration::from_millis(10);
+pub(crate) const SYN_INTERVAL: Duration = Duration::from_millis(10);
 const MIN_EXP_INTERVAL: Duration = Duration::from_millis(300);
 const ACK_INTERVAL: Duration = SYN_INTERVAL;
 const PACKETS_BETWEEN_LIGHT_ACK: usize = 64;
@@ -49,52 +48,28 @@ impl TryFrom<u32> for SocketType {
 #[derive(Debug)]
 pub struct UdtSocket {
     pub socket_id: SocketId,
-    pub status: UdtStatus,
+    pub status: RwLock<UdtStatus>,
     pub socket_type: SocketType,
     listen_socket: Option<SocketId>,
     pub peer_addr: Option<SocketAddr>,
-    pub peer_socket_id: Option<SocketId>,
+    pub peer_socket_id: RwLock<Option<SocketId>>,
     pub initial_seq_number: SeqNumber,
 
-    pub(crate) queued_sockets: BTreeSet<SocketId>,
+    pub(crate) queued_sockets: RwLock<BTreeSet<SocketId>>,
     pub(crate) accept_notify: Notify,
     pub(crate) backlog_size: usize,
     pub(crate) multiplexer: Weak<RwLock<UdtMultiplexer>>,
-    pub configuration: UdtConfiguration,
+    pub configuration: RwLock<UdtConfiguration>,
 
-    rcv_buffer: RcvBuffer,
-    snd_buffer: SndBuffer,
-    flow_window_size: u32,
-    flow: UdtFlow,
-    self_ip: Option<IpAddr>,
+    rcv_buffer: RwLock<RcvBuffer>,
+    snd_buffer: RwLock<SndBuffer>,
+    flow: RwLock<UdtFlow>,
+    // self_ip: Option<IpAddr>,
     start_time: Instant,
-    last_rsp_time: Instant,
 
-    // Receiving related,
-    last_sent_ack: SeqNumber,
-    last_sent_ack_time: Instant,
-    curr_rcv_seq_number: SeqNumber,
-    last_ack_seq_number: AckSeqNumber,
-    rcv_loss_list: RcvLossList,
-    last_ack2_received: SeqNumber,
+    state: RwLock<SocketState>,
+
     rcv_notify: Notify,
-
-    // Sending related
-    last_ack_received: SeqNumber,
-    last_data_ack_processed: SeqNumber,
-    last_ack2_sent_back: AckSeqNumber,
-    curr_snd_seq_number: SeqNumber,
-    last_ack2_time: Instant,
-    snd_loss_list: RcvLossList,
-
-    next_ack_time: Instant,
-    interpacket_interval: Duration,
-    ack_packet_counter: usize,
-    light_ack_counter: usize,
-
-    ack_window: AckWindow,
-
-    exp_count: u32,
 }
 
 impl UdtSocket {
@@ -109,51 +84,36 @@ impl UdtSocket {
         Self {
             socket_id,
             socket_type,
-            status: UdtStatus::Init,
+            status: RwLock::new(UdtStatus::Init),
             initial_seq_number,
             peer_addr: None,
-            peer_socket_id: None,
+            peer_socket_id: RwLock::new(None),
             listen_socket: None,
-            queued_sockets: BTreeSet::new(),
+            queued_sockets: RwLock::new(BTreeSet::new()),
             accept_notify: Notify::new(),
             backlog_size: 0,
             multiplexer: Weak::new(),
-            snd_buffer: SndBuffer::new(configuration.mss),
-            rcv_buffer: RcvBuffer::new(configuration.rcv_buf_size, initial_seq_number),
-            flow: UdtFlow::default(),
-            flow_window_size: 0,
-            self_ip: None,
+            snd_buffer: RwLock::new(SndBuffer::new(
+                configuration.snd_buf_size,
+                configuration.mss,
+            )),
+            rcv_buffer: RwLock::new(RcvBuffer::new(
+                configuration.rcv_buf_size,
+                initial_seq_number,
+            )),
+            flow: RwLock::new(UdtFlow::default()),
+            // self_ip: None,
             start_time: now,
-            last_rsp_time: now,
-            last_ack_seq_number: AckSeqNumber::zero(),
-            rcv_loss_list: RcvLossList::new(configuration.flight_flag_size),
-            curr_rcv_seq_number: initial_seq_number - 1,
 
-            next_ack_time: now + SYN_INTERVAL,
-            interpacket_interval: Duration::from_micros(10),
-            ack_packet_counter: 0,
-            light_ack_counter: 0,
-
-            exp_count: 1,
-            last_ack_received: initial_seq_number - 1,
-            last_sent_ack: initial_seq_number - 1,
-            last_sent_ack_time: now,
-            last_ack2_received: initial_seq_number.number().into(),
-
-            curr_snd_seq_number: initial_seq_number - 1,
-            last_ack2_sent_back: initial_seq_number.number().into(),
-            last_ack2_time: now,
-            last_data_ack_processed: initial_seq_number,
-            snd_loss_list: RcvLossList::new(configuration.flight_flag_size * 2),
-            ack_window: AckWindow::new(1024),
-            configuration,
+            state: RwLock::new(SocketState::new(initial_seq_number, &configuration)),
             rcv_notify: Notify::new(),
+            configuration: RwLock::new(configuration),
         }
     }
 
-    pub fn with_peer(mut self, peer: SocketAddr, peer_socket_id: SocketId) -> Self {
+    pub async fn with_peer(mut self, peer: SocketAddr, peer_socket_id: SocketId) -> Self {
         self.peer_addr = Some(peer);
-        self.peer_socket_id = Some(peer_socket_id);
+        *self.peer_socket_id.write().await = Some(peer_socket_id);
         self
     }
 
@@ -167,8 +127,8 @@ impl UdtSocket {
         self
     }
 
-    pub fn open(&mut self) {
-        self.status = UdtStatus::Opened;
+    pub async fn open(&self) {
+        *self.status.write().await = UdtStatus::Opened;
     }
 
     pub(crate) async fn connect_on_handshake(
@@ -176,29 +136,34 @@ impl UdtSocket {
         peer: SocketAddr,
         mut hs: HandShakeInfo,
     ) -> Result<SocketRef> {
-        if hs.max_packet_size > self.configuration.mss {
-            hs.max_packet_size = self.configuration.mss;
-        } else {
-            self.configuration.mss = hs.max_packet_size;
-        }
+        {
+            let mut configuration = self.configuration.write().await;
+            if hs.max_packet_size > configuration.mss {
+                hs.max_packet_size = configuration.mss;
+            } else {
+                configuration.mss = hs.max_packet_size;
+            }
 
-        self.flow_window_size = hs.max_window_size;
-        hs.max_window_size = std::cmp::min(
-            self.configuration.rcv_buf_size,
-            self.configuration.flight_flag_size,
-        );
-        self.set_self_ip(hs.ip_address);
+            self.flow.write().await.flow_window_size = hs.max_window_size;
+            hs.max_window_size =
+                std::cmp::min(configuration.rcv_buf_size, configuration.flight_flag_size);
+        }
+        // self.set_self_ip(hs.ip_address);
         hs.ip_address = peer.ip();
+        hs.socket_id = self.socket_id;
 
         // TODO: use network information cache to set RTT, bandwidth, etc.
         // TODO: init congestion control
 
         self.peer_addr = Some(peer);
-        self.status = UdtStatus::Connected;
+        *self.status.write().await = UdtStatus::Connected;
 
         let packet = UdtControlPacket::new_handshake(
             hs,
-            self.peer_socket_id.expect("peer_socket_id not defined"),
+            self.peer_socket_id
+                .read()
+                .await
+                .expect("peer_socket_id not defined"),
         );
 
         if let Some(lock) = self.multiplexer.upgrade() {
@@ -215,9 +180,9 @@ impl UdtSocket {
         self.multiplexer = Arc::downgrade(mux);
     }
 
-    pub fn set_self_ip(&mut self, ip: IpAddr) {
-        self.self_ip = Some(ip);
-    }
+    // pub fn set_self_ip(&mut self, ip: IpAddr) {
+    //     self.self_ip = Some(ip);
+    // }
 
     pub async fn self_addr(&self) -> Option<SocketAddr> {
         if let Some(mux) = self.multiplexer.upgrade() {
@@ -226,8 +191,9 @@ impl UdtSocket {
         None
     }
 
-    pub(crate) async fn next_data_packet(&mut self) -> Result<Option<(UdtDataPacket, Instant)>> {
-        if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status) {
+    pub(crate) async fn next_data_packet(&self) -> Result<Option<(UdtDataPacket, Instant)>> {
+        if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status().await)
+        {
             return Err(Error::new(
                 ErrorKind::BrokenPipe,
                 "socket is closed or broken",
@@ -236,18 +202,20 @@ impl UdtSocket {
         let now = Instant::now();
         let mut probe = false;
 
-        let packet = match self.snd_loss_list.pop_after(self.last_data_ack_processed) {
+        let mut state = self.state.write().await;
+        let last_data_ack_processed = state.last_data_ack_processed;
+        let packet = match state.snd_loss_list.pop_after(last_data_ack_processed) {
             Some(seq) => {
                 // Loss retransmission has priority
-                let offset = seq - self.last_data_ack_processed;
+                let offset = seq - state.last_data_ack_processed;
                 if offset < 0 {
                     eprintln!("unexpected offset in sender loss list");
                     return Ok(None);
                 }
-                match self.snd_buffer.read_data(
+                match self.snd_buffer.write().await.read_data(
                     offset as usize,
                     seq,
-                    self.peer_socket_id.unwrap(),
+                    self.peer_socket_id.read().await.unwrap(),
                     self.start_time,
                 ) {
                     Err((msg_number, msg_len)) => {
@@ -259,13 +227,14 @@ impl UdtSocket {
                             msg_number,
                             start,
                             end,
-                            self.peer_socket_id.unwrap(),
+                            self.peer_socket_id.read().await.unwrap(),
                         );
                         self.send_packet(drop.into()).await?;
-                        self.snd_loss_list
-                            .remove_all(self.last_data_ack_processed, end);
-                        if end + 1 - self.curr_snd_seq_number > 0 {
-                            self.curr_snd_seq_number = end + 1;
+
+                        let last_data_ack_processed = state.last_data_ack_processed;
+                        state.snd_loss_list.remove_all(last_data_ack_processed, end);
+                        if (end + 1) - state.curr_snd_seq_number > 0 {
+                            state.curr_snd_seq_number = end + 1;
                         }
                         return Ok(None);
                     }
@@ -274,18 +243,18 @@ impl UdtSocket {
             }
             None => {
                 // TODO: check congestion window
-                let window_size = self.flow_window_size;
-                if (self.curr_snd_seq_number - self.last_ack_received) < window_size as i32 {
+                let window_size = self.flow.read().await.flow_window_size;
+                if (state.curr_snd_seq_number - state.last_ack_received) > window_size as i32 {
                     return Ok(None);
                 }
-                match self.snd_buffer.fetch(
-                    self.curr_snd_seq_number + 1,
-                    self.peer_socket_id.unwrap(),
+                match self.snd_buffer.write().await.fetch(
+                    state.curr_snd_seq_number + 1,
+                    self.peer_socket_id.read().await.unwrap(),
                     self.start_time,
                 ) {
                     Some(packet) => {
-                        self.curr_snd_seq_number = self.curr_snd_seq_number + 1;
-                        if self.curr_snd_seq_number.number() % 16 == 0 {
+                        state.curr_snd_seq_number = state.curr_snd_seq_number + 1;
+                        if state.curr_snd_seq_number.number() % 16 == 0 {
                             probe = true;
                         }
                         packet
@@ -301,7 +270,7 @@ impl UdtSocket {
         }
 
         // TODO keep track of difference with target time
-        Ok(Some((packet, now + self.interpacket_interval)))
+        Ok(Some((packet, now + state.interpacket_interval)))
     }
 
     fn compute_cookie(&self, addr: &SocketAddr, offset: Option<isize>) -> u32 {
@@ -331,7 +300,8 @@ impl UdtSocket {
         addr: SocketAddr,
         hs: &HandShakeInfo,
     ) -> Result<()> {
-        if self.status == UdtStatus::Closing || self.status == UdtStatus::Closed {
+        let status = self.status().await;
+        if status == UdtStatus::Closing || status == UdtStatus::Closed {
             return Err(Error::new(ErrorKind::ConnectionRefused, "socket closed"));
         }
 
@@ -362,8 +332,8 @@ impl UdtSocket {
         }
 
         let dest_socket_id = hs.socket_id;
-        if hs.udt_version != self.configuration.udt_version() || hs.socket_type != self.socket_type
-        {
+        let configuration = self.configuration.read().await;
+        if hs.udt_version != configuration.udt_version() || hs.socket_type != self.socket_type {
             // Reject request
             let mut hs_response = hs.clone();
             hs_response.connection_type = 1002; // Error codes defined in C++ implementation
@@ -378,27 +348,37 @@ impl UdtSocket {
         Udt::get()
             .write()
             .await
-            .new_connection(self.socket_id, addr, hs)
+            .new_connection(self, addr, hs)
             .await?;
         // Send handshake packet in case of errors on connection?
 
         Ok(())
     }
 
-    pub(crate) async fn process_packet(&mut self, packet: UdtPacket) -> Result<()> {
+    pub(crate) async fn process_packet(&self, packet: UdtPacket) -> Result<()> {
         match packet {
             UdtPacket::Control(ctrl) => self.process_ctrl(ctrl).await,
             UdtPacket::Data(data) => self.process_data(data).await,
         }
     }
 
-    async fn process_ctrl(&mut self, packet: UdtControlPacket) -> Result<()> {
-        self.exp_count = 1;
-        let now = Instant::now();
-        self.last_rsp_time = now;
+    async fn process_ctrl(&self, packet: UdtControlPacket) -> Result<()> {
+        let mut state = self.state.write().await;
+        state.exp_count = 1;
+        state.last_rsp_time = Instant::now();
 
         match packet.packet_type {
             ControlPacketType::Handshake(hs) => {
+                if self.status().await != UdtStatus::Connecting {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        format!(
+                            "unexpected handshake for socket with status {:?}",
+                            self.status
+                        ),
+                    ));
+                }
+
                 // TODO: handle rendezvous mode
                 if hs.connection_type > 0 {
                     let mut hs = hs.clone();
@@ -406,6 +386,21 @@ impl UdtSocket {
                     hs.socket_id = self.socket_id;
                     let hs_packet = UdtControlPacket::new_handshake(hs, 0);
                     self.send_packet(hs_packet.into()).await?;
+                } else {
+                    // post connect
+                    let mut configuration = self.configuration.write().await;
+                    configuration.mss = hs.max_packet_size;
+                    configuration.flight_flag_size = hs.max_window_size;
+                    state.last_sent_ack = hs.initial_seq_number;
+                    state.last_ack2_received = hs.initial_seq_number;
+                    state.curr_rcv_seq_number = hs.initial_seq_number - 1;
+                    *self.peer_socket_id.write().await = Some(hs.socket_id);
+                    // self.self_ip = Some(hs.ip_address);
+
+                    // TODO: check size of loss lists
+
+                    // TODO: init CC
+                    *self.status.write().await = UdtStatus::Connected;
                 }
             }
             ControlPacketType::KeepAlive => (),
@@ -413,59 +408,72 @@ impl UdtSocket {
                 match &ack.info {
                     None => {
                         let seq = ack.next_seq_number;
-                        if (seq - self.last_ack_received) >= 0 {
-                            self.last_ack_received = seq;
-                            self.flow_window_size -= (seq - self.last_ack_received) as u32;
+                        if (seq - state.last_ack_received) >= 0 {
+                            state.last_ack_received = seq;
+                            self.flow.write().await.flow_window_size -=
+                                (seq - state.last_ack_received) as u32;
                         }
                     }
                     Some(extra) => {
                         let ack_seq = packet.ack_seq_number().unwrap();
-                        if self.last_ack2_time.elapsed() > SYN_INTERVAL
-                            || ack_seq == self.last_ack2_sent_back
+                        if state.last_ack2_time.elapsed() > SYN_INTERVAL
+                            || ack_seq == state.last_ack2_sent_back
                         {
-                            if let Some(peer) = self.peer_socket_id {
+                            if let Some(peer) = *self.peer_socket_id.read().await {
                                 let ack2_packet = UdtControlPacket::new_ack2(ack_seq, peer);
                                 self.send_packet(ack2_packet.into()).await?;
-                                self.last_ack2_sent_back = ack_seq;
-                                self.last_ack2_time = Instant::now();
+                                state.last_ack2_sent_back = ack_seq;
+                                state.last_ack2_time = Instant::now();
                             }
                         }
 
                         let seq = ack.next_seq_number;
 
-                        if (seq - self.curr_rcv_seq_number) > 1 {
+                        if (seq - state.curr_snd_seq_number) > 1 {
                             // This should not happen
                             eprintln!("Udt socket broken: seq number is larger than expected");
-                            self.status = UdtStatus::Broken;
+                            *self.status.write().await = UdtStatus::Broken;
                         }
 
-                        if (seq - self.last_ack_received) >= 0 {
-                            self.flow_window_size = extra.available_buf_size;
-                            self.last_ack_received = seq;
+                        if (seq - state.last_ack_received) >= 0 {
+                            self.flow.write().await.flow_window_size = extra.available_buf_size;
+                            state.last_ack_received = seq;
                         }
 
-                        let offset = seq - self.last_data_ack_processed;
+                        let offset = seq - state.last_data_ack_processed;
                         if offset <= 0 {
                             // Ignore Repeated acks
                             return Ok(());
                         }
 
-                        self.snd_buffer.ack_data(offset);
-                        self.snd_loss_list
-                            .remove_all(self.last_data_ack_processed, seq - 1);
+                        self.snd_buffer.write().await.ack_data(offset);
+                        let last_data_ack_processed = state.last_data_ack_processed;
+                        state
+                            .snd_loss_list
+                            .remove_all(last_data_ack_processed, seq - 1);
                         // TODO record times for monitoring purposes
-                        self.last_data_ack_processed = seq;
+                        state.last_data_ack_processed = seq;
                         self.update_snd_queue(false).await;
 
                         self.flow
+                            .write()
+                            .await
                             .update_rtt(Duration::from_millis(extra.rtt.into()));
                         self.flow
+                            .write()
+                            .await
                             .update_rtt_var(Duration::from_millis(extra.rtt_variance.into()));
                         if extra.pack_recv_rate > 0 {
-                            self.flow.update_peer_delivery_rate(extra.pack_recv_rate);
+                            self.flow
+                                .write()
+                                .await
+                                .update_peer_delivery_rate(extra.pack_recv_rate);
                         }
                         if extra.link_capacity > 0 {
-                            self.flow.update_bandwidth(extra.link_capacity);
+                            self.flow
+                                .write()
+                                .await
+                                .update_bandwidth(extra.link_capacity);
                         }
                         // TODO: CCC
                     }
@@ -473,18 +481,19 @@ impl UdtSocket {
             }
             ControlPacketType::Ack2 => {
                 let ack_seq = packet.ack_seq_number().unwrap();
-                if let Some((seq, rtt)) = self.ack_window.get(ack_seq) {
+                if let Some((seq, rtt)) = state.ack_window.get(ack_seq) {
+                    let mut flow = self.flow.write().await;
                     let rtt_abs_diff = {
-                        if rtt > self.flow.rtt {
-                            rtt - self.flow.rtt
+                        if rtt > flow.rtt {
+                            rtt - flow.rtt
                         } else {
-                            self.flow.rtt - rtt
+                            flow.rtt - rtt
                         }
                     };
-                    self.flow.update_rtt_var(rtt_abs_diff);
-                    self.flow.update_rtt(rtt);
-                    if (seq - self.last_ack2_received) > 0 {
-                        self.last_ack2_received = seq;
+                    flow.update_rtt_var(rtt_abs_diff);
+                    flow.update_rtt(rtt);
+                    if (seq - state.last_ack2_received) > 0 {
+                        state.last_ack2_received = seq;
                     }
                 }
             }
@@ -506,36 +515,39 @@ impl UdtSocket {
                             ((*loss).into(), (*loss).into())
                         }
                     };
-                    if (seq_start - seq_end > 0) || (seq_end - self.curr_snd_seq_number > 0) {
+                    if (seq_start - seq_end > 0) || (seq_end - state.curr_snd_seq_number > 0) {
                         broken = true;
                         break;
                     }
-                    if seq_start - self.last_ack_received >= 0 {
-                        self.snd_loss_list.insert(seq_start, seq_end);
-                    } else if seq_end - self.last_ack_received >= 0 {
-                        self.snd_loss_list.insert(self.last_ack_received, seq_end);
+                    if seq_start - state.last_ack_received >= 0 {
+                        state.snd_loss_list.insert(seq_start, seq_end);
+                    } else if seq_end - state.last_ack_received >= 0 {
+                        let last_ack_received = state.last_ack_received;
+                        state.snd_loss_list.insert(last_ack_received, seq_end);
                     }
                 }
 
                 if broken {
-                    self.status = UdtStatus::Broken;
+                    println!("NAK is broken: {:?} {:?}", nak, state);
+                    *self.status.write().await = UdtStatus::Broken;
                     return Ok(());
                 }
 
                 self.update_snd_queue(true).await;
             }
             ControlPacketType::Shutdown => {
-                self.status = UdtStatus::Closing;
+                *self.status.write().await = UdtStatus::Closing;
             }
             ControlPacketType::MsgDropRequest(ref drop) => {
                 let msg_number = packet.msg_seq_number().unwrap();
-                self.rcv_buffer.drop_msg(msg_number);
-                self.rcv_loss_list
+                self.rcv_buffer.write().await.drop_msg(msg_number);
+                state
+                    .rcv_loss_list
                     .remove_all(drop.first_seq_number, drop.last_seq_number);
-                if (drop.first_seq_number - (self.curr_rcv_seq_number + 1)) <= 0
-                    && (drop.last_seq_number - self.curr_rcv_seq_number) > 0
+                if (drop.first_seq_number - (state.curr_rcv_seq_number + 1)) <= 0
+                    && (drop.last_seq_number - state.curr_rcv_seq_number) > 0
                 {
-                    self.curr_rcv_seq_number = drop.last_seq_number;
+                    state.curr_rcv_seq_number = drop.last_seq_number;
                 }
             }
             ControlPacketType::UserDefined => unimplemented!(),
@@ -543,28 +555,33 @@ impl UdtSocket {
         Ok(())
     }
 
-    async fn process_data(&mut self, packet: UdtDataPacket) -> Result<()> {
-        self.last_rsp_time = Instant::now();
+    async fn process_data(&self, packet: UdtDataPacket) -> Result<()> {
+        let mut state = self.state.write().await;
+        state.last_rsp_time = Instant::now();
 
         // CC onPktReceived
         // pktCount++
 
-        self.flow.on_pkt_arrival();
-
         let seq_number = packet.header.seq_number;
-        if seq_number.number() % PROBE_MODULO == 0 {
-            self.flow.on_probe1_arrival();
-        } else if seq_number.number() % PROBE_MODULO == 1 {
-            self.flow.on_probe2_arrival();
+
+        {
+            let mut flow = self.flow.write().await;
+            flow.on_pkt_arrival();
+
+            if seq_number.number() % PROBE_MODULO == 0 {
+                flow.on_probe1_arrival();
+            } else if seq_number.number() % PROBE_MODULO == 1 {
+                flow.on_probe2_arrival();
+            }
         }
 
         // trace_rcv++
         // recv_total++
-        let offset = seq_number - self.last_sent_ack;
+        let offset = seq_number - state.last_sent_ack;
         if offset < 0 {
             return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
         }
-        if self.rcv_buffer.get_available_buf_size() < offset as u32 {
+        if self.rcv_buffer.read().await.get_available_buf_size() < offset as u32 {
             return Err(Error::new(
                 ErrorKind::OutOfMemory,
                 "not enough space in rcv buffer",
@@ -572,45 +589,53 @@ impl UdtSocket {
         }
 
         let payload_len = packet.payload_len();
-        self.rcv_buffer.insert(packet)?;
-        if seq_number > self.curr_rcv_seq_number + 1 {
+        self.rcv_buffer.write().await.insert(packet)?;
+        if seq_number > state.curr_rcv_seq_number + 1 {
+            println!("lost packets?");
+            println!("seq_number {:?}", seq_number);
+            println!("curr_recv_seq_number {:?}", state.curr_rcv_seq_number);
+
             // some packets have been lost in between
-            self.rcv_loss_list
-                .insert(self.curr_rcv_seq_number + 1, seq_number - 1);
+            let curr_rcv_seq_number = state.curr_rcv_seq_number;
+            state
+                .rcv_loss_list
+                .insert(curr_rcv_seq_number + 1, seq_number - 1);
 
             // send NAK immedialtely
             let loss_list = {
-                if self.curr_rcv_seq_number + 1 == seq_number - 1 {
+                if state.curr_rcv_seq_number + 1 == seq_number - 1 {
                     vec![(seq_number - 1).number()]
                 } else {
                     vec![
-                        (self.curr_rcv_seq_number + 1).number() | 0x80000000,
+                        (state.curr_rcv_seq_number + 1).number() | 0x80000000,
                         (seq_number - 1).number(),
                     ]
                 }
             };
-            let nak_packet = UdtControlPacket::new_nak(loss_list, self.peer_socket_id.unwrap_or(0));
+            let nak_packet =
+                UdtControlPacket::new_nak(loss_list, self.peer_socket_id.read().await.unwrap_or(0));
             self.send_packet(nak_packet.into()).await?;
             // TODO increment NAK stats
         }
 
-        if payload_len < self.get_max_payload_size() {
-            self.next_ack_time = Instant::now();
+        if payload_len < self.get_max_payload_size().await {
+            state.next_ack_time = Instant::now();
         }
 
-        if seq_number - self.curr_rcv_seq_number > 0 {
-            self.curr_rcv_seq_number = seq_number;
+        if seq_number - state.curr_rcv_seq_number > 0 {
+            state.curr_rcv_seq_number = seq_number;
         } else {
-            self.rcv_loss_list.remove(seq_number);
+            state.rcv_loss_list.remove(seq_number);
         }
 
         Ok(())
     }
 
-    pub fn get_max_payload_size(&self) -> u32 {
+    pub async fn get_max_payload_size(&self) -> u32 {
+        let configuration = self.configuration.read().await;
         match self.peer_addr.map(|a| a.ip()) {
-            Some(IpAddr::V6(_)) => self.configuration.mss - 40 - UDT_HEADER_SIZE,
-            _ => self.configuration.mss - 28 - UDT_HEADER_SIZE,
+            Some(IpAddr::V6(_)) => configuration.mss - 40 - UDT_HEADER_SIZE,
+            _ => configuration.mss - 28 - UDT_HEADER_SIZE,
         }
     }
 
@@ -621,120 +646,141 @@ impl UdtSocket {
         Ok(())
     }
 
-    async fn send_ack(&mut self, light: bool) -> Result<()> {
-        let seq_number = match self.rcv_loss_list.peek_after(self.curr_rcv_seq_number + 1) {
+    async fn send_ack(&self, state: &mut SocketState, light: bool) -> Result<()> {
+        let seq_number = match state
+            .rcv_loss_list
+            .peek_after(state.curr_rcv_seq_number + 1)
+        {
             Some(num) => num,
-            None => self.curr_rcv_seq_number + 1,
+            None => state.curr_rcv_seq_number + 1,
         };
 
-        if seq_number == self.last_ack2_received {
+        if seq_number == state.last_ack2_received {
             return Ok(());
         }
 
         if light {
             // Save time on buffer procesing and bandwith measurement
-            let ack_packet =
-                UdtControlPacket::new_ack(0.into(), seq_number, self.peer_socket_id.unwrap(), None);
+            let ack_packet = UdtControlPacket::new_ack(
+                0.into(),
+                seq_number,
+                self.peer_socket_id.read().await.unwrap(),
+                None,
+            );
             self.send_packet(ack_packet.into()).await?;
             return Ok(());
         }
 
-        let to_ack = seq_number - self.last_sent_ack;
+        let to_ack: i32 = seq_number - state.last_sent_ack;
         if to_ack > 0 {
-            self.rcv_buffer.ack_data(seq_number);
-            self.last_sent_ack = seq_number;
+            self.rcv_buffer.write().await.ack_data(seq_number);
+            state.last_sent_ack = seq_number;
             self.rcv_notify.notify_waiters();
-        } else if seq_number == self.last_sent_ack {
-            if self.last_sent_ack_time.elapsed() < (self.flow.rtt + 4 * self.flow.rtt_var) {
+        } else if seq_number == state.last_sent_ack {
+            let flow = self.flow.read().await;
+            if state.last_sent_ack_time.elapsed() < (flow.rtt + 4 * flow.rtt_var) {
                 return Ok(());
             }
         } else {
             return Ok(());
         }
 
-        if (self.last_sent_ack - self.last_ack2_received) > 0 {
-            self.last_ack_seq_number = self.last_ack_seq_number + 1;
+        if (state.last_sent_ack - state.last_ack2_received) > 0 {
+            state.last_ack_seq_number = state.last_ack_seq_number + 1;
+            let flow = self.flow.read().await;
             let mut ack_info = AckOptionalInfo {
-                rtt: self.flow.rtt.as_micros().try_into().unwrap_or(u32::MAX),
-                rtt_variance: self.flow.rtt_var.as_micros().try_into().unwrap_or(u32::MAX),
-                available_buf_size: std::cmp::max(self.rcv_buffer.get_available_buf_size(), 2),
+                rtt: flow.rtt.as_micros().try_into().unwrap_or(u32::MAX),
+                rtt_variance: flow.rtt_var.as_micros().try_into().unwrap_or(u32::MAX),
+                available_buf_size: std::cmp::max(
+                    self.rcv_buffer.read().await.get_available_buf_size(),
+                    2,
+                ),
                 // TODO: use rcv_time_window to keep track of bandwidth / recv speed
                 pack_recv_rate: 0,
                 link_capacity: 0,
             };
-            if self.last_sent_ack_time.elapsed() > SYN_INTERVAL {
-                ack_info.pack_recv_rate = self.flow.get_pkt_rcv_speed();
-                ack_info.link_capacity = self.flow.get_bandwidth();
-                self.last_sent_ack_time = Instant::now();
+            if state.last_sent_ack_time.elapsed() > SYN_INTERVAL {
+                ack_info.pack_recv_rate = flow.get_pkt_rcv_speed();
+                ack_info.link_capacity = flow.get_bandwidth();
+                state.last_sent_ack_time = Instant::now();
             }
             let ack_packet = UdtControlPacket::new_ack(
-                self.last_ack_seq_number,
-                self.last_sent_ack,
-                self.peer_socket_id.unwrap(),
+                state.last_ack_seq_number,
+                state.last_sent_ack,
+                self.peer_socket_id.read().await.unwrap(),
                 Some(ack_info),
             );
             self.send_packet(ack_packet.into()).await?;
-            self.ack_window
-                .store(self.last_sent_ack, self.last_ack_seq_number);
+            state
+                .ack_window
+                .store(state.last_sent_ack, state.last_ack_seq_number);
         }
 
         Ok(())
     }
 
-    fn cc_update(&mut self) {
+    fn cc_update(&self) {
         // TODO update CC parameters
 
         //self.interpacket_interval = ...
     }
 
-    pub(crate) async fn check_timers(&mut self) {
+    pub(crate) async fn check_timers(&self) {
         self.cc_update();
         let now = Instant::now();
-        if now > self.next_ack_time {
+        let mut state = self.state.write().await;
+        if now > state.next_ack_time {
             // TODO: use CC ack interval too
-            self.send_ack(false).await.unwrap_or_else(|err| {
-                eprintln!("failed to send ack: {:?}", err);
-            });
-            self.next_ack_time = now + ACK_INTERVAL;
-
-            self.ack_packet_counter = 0;
-            self.light_ack_counter = 0;
-        } else if (self.light_ack_counter + 1) * PACKETS_BETWEEN_LIGHT_ACK
-            <= self.ack_packet_counter
+            self.send_ack(&mut state, false)
+                .await
+                .unwrap_or_else(|err| {
+                    eprintln!("failed to send ack: {:?}", err);
+                });
+            state.next_ack_time = now + ACK_INTERVAL;
+            state.ack_packet_counter = 0;
+            state.light_ack_counter = 0;
+        } else if (state.light_ack_counter + 1) * PACKETS_BETWEEN_LIGHT_ACK
+            <= state.ack_packet_counter
         {
-            self.send_ack(true).await.unwrap_or_else(|err| {
+            self.send_ack(&mut state, true).await.unwrap_or_else(|err| {
                 eprintln!("failed to send ack: {:?}", err);
             });
-            self.light_ack_counter += 1;
+            state.light_ack_counter += 1;
         }
 
         // TODO use user-defined RTO
         let next_exp = {
-            let exp_int = self.exp_count * (self.flow.rtt + 4 * self.flow.rtt_var) + SYN_INTERVAL;
-            std::cmp::max(exp_int, self.exp_count * MIN_EXP_INTERVAL)
+            let flow = self.flow.read().await;
+            let exp_int = state.exp_count * (flow.rtt + 4 * flow.rtt_var) + SYN_INTERVAL;
+            std::cmp::max(exp_int, state.exp_count * MIN_EXP_INTERVAL)
         };
-        let next_exp_time = self.last_rsp_time + next_exp;
+        let next_exp_time = state.last_rsp_time + next_exp;
         if now > next_exp_time {
-            if self.exp_count > 16 && self.last_rsp_time.elapsed() > Duration::from_secs(5) {
+            if state.exp_count > 16 && state.last_rsp_time.elapsed() > Duration::from_secs(5) {
                 // Connection is broken
-                self.status = UdtStatus::Broken;
+                *self.status.write().await = UdtStatus::Broken;
                 self.update_snd_queue(true).await;
                 return;
             }
 
-            if self.snd_buffer.is_empty() {
-                let keep_alive = UdtControlPacket::new_keep_alive(self.peer_socket_id.unwrap());
-                self.send_packet(keep_alive.into())
-                    .await
-                    .unwrap_or_else(|err| {
-                        eprintln!("failed to send keep alive: {:?}", err);
-                    });
+            if self.snd_buffer.read().await.is_empty() {
+                if let Some(peer_socket_id) = *self.peer_socket_id.read().await {
+                    let keep_alive = UdtControlPacket::new_keep_alive(peer_socket_id);
+                    self.send_packet(keep_alive.into())
+                        .await
+                        .unwrap_or_else(|err| {
+                            eprintln!("failed to send keep alive: {:?}", err);
+                        });
+                }
             } else {
-                if (self.last_ack_received != self.curr_snd_seq_number + 1)
-                    && self.snd_loss_list.is_empty()
+                if (state.last_ack_received != state.curr_snd_seq_number + 1)
+                    && state.snd_loss_list.is_empty()
                 {
-                    self.snd_loss_list
-                        .insert(self.last_ack_received, self.curr_snd_seq_number);
+                    let last_ack_received = state.last_ack_received;
+                    let curr_snd_seq_number = state.curr_snd_seq_number;
+                    state
+                        .snd_loss_list
+                        .insert(last_ack_received, curr_snd_seq_number);
                 }
 
                 // TODO: CC onTimeout
@@ -742,9 +788,9 @@ impl UdtSocket {
                 self.update_snd_queue(true).await;
             }
 
-            self.exp_count += 1;
+            state.exp_count += 1;
             // Reset last response time since we just sent a heart-beat.
-            self.last_rsp_time = now;
+            state.last_rsp_time = now;
         }
     }
 
@@ -755,14 +801,14 @@ impl UdtSocket {
         }
     }
 
-    pub async fn send(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn send(&self, data: &[u8]) -> Result<()> {
         if self.socket_type != SocketType::Stream {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "socket needs to be configured in stream mode to send data buffer",
             ));
         }
-        if self.status != UdtStatus::Connected {
+        if self.status().await != UdtStatus::Connected {
             return Err(Error::new(
                 ErrorKind::NotConnected,
                 "UDT socket is not connected",
@@ -773,32 +819,35 @@ impl UdtSocket {
             return Ok(());
         }
 
-        if self.snd_buffer.is_empty() {
+        if self.snd_buffer.read().await.is_empty() {
             // delay the EXP timer to avoid mis-fired timeout
-            self.last_rsp_time = Instant::now();
+            self.state.write().await.last_rsp_time = Instant::now();
         }
 
-        // TODO limit snd buffer size
-        self.snd_buffer.add_message(data, None, false);
+        self.snd_buffer
+            .write()
+            .await
+            .add_message(data, None, false)?;
         self.update_snd_queue(false).await;
         Ok(())
     }
 
-    pub async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+    pub async fn recv(&self, buf: &mut [u8]) -> Result<usize> {
         if self.socket_type != SocketType::Stream {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "cannot recv on non-stream socket",
             ));
         }
-        if self.status == UdtStatus::Broken || self.status == UdtStatus::Closing {
-            if !self.rcv_buffer.has_data_to_read() {
+        let status = self.status().await;
+        if status == UdtStatus::Broken || status == UdtStatus::Closing {
+            if !self.rcv_buffer.read().await.has_data_to_read() {
                 return Err(Error::new(
                     ErrorKind::BrokenPipe,
                     "connection was closed or broken",
                 ));
             }
-        } else if self.status != UdtStatus::Connected {
+        } else if status != UdtStatus::Connected {
             return Err(Error::new(
                 ErrorKind::NotConnected,
                 "UDT socket not connected",
@@ -809,25 +858,26 @@ impl UdtSocket {
             return Ok(0);
         }
 
-        if !self.rcv_buffer.has_data_to_read() {
+        if !self.rcv_buffer.read().await.has_data_to_read() {
             self.rcv_notify.notified().await;
         }
 
-        if self.status == UdtStatus::Broken || self.status == UdtStatus::Closing {
-            if !self.rcv_buffer.has_data_to_read() {
+        let status = self.status().await;
+        if status == UdtStatus::Broken || status == UdtStatus::Closing {
+            if !self.rcv_buffer.read().await.has_data_to_read() {
                 return Err(Error::new(
                     ErrorKind::BrokenPipe,
                     "connection was closed or broken",
                 ));
             }
-        } else if self.status != UdtStatus::Connected {
+        } else if status != UdtStatus::Connected {
             return Err(Error::new(
                 ErrorKind::NotConnected,
                 "UDT socket not connected",
             ));
         }
 
-        let written = self.rcv_buffer.read_buffer(buf);
+        let written = self.rcv_buffer.write().await.read_buffer(buf);
 
         // TODO: handle UDT timeout
 
@@ -835,29 +885,33 @@ impl UdtSocket {
     }
 
     pub(crate) async fn connect(&mut self, addr: SocketAddr) -> Result<()> {
-        if self.status != UdtStatus::Init {
+        if self.status().await != UdtStatus::Init {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 format!("expected status Init, found {:?}", self.status),
             ));
         }
 
-        self.open();
-        let mut udt = Udt::get().write().await;
-        udt.update_mux(self, None).await?;
+        self.open().await;
+        {
+            let mut udt = Udt::get().write().await;
+            udt.update_mux(self, None).await?;
+        }
 
-        self.status = UdtStatus::Connecting;
+        *self.status.write().await = UdtStatus::Connecting;
         self.peer_addr = Some(addr);
 
         // TODO: use rendezvous queue?
 
+        let configuration = self.configuration.read().await;
+
         let hs = HandShakeInfo {
-            udt_version: self.configuration.udt_version(),
+            udt_version: configuration.udt_version(),
             initial_seq_number: self.initial_seq_number,
-            max_packet_size: self.configuration.mss,
+            max_packet_size: configuration.mss,
             max_window_size: std::cmp::min(
-                self.flow_window_size,
-                self.rcv_buffer.get_available_buf_size(),
+                self.flow.read().await.flow_window_size,
+                self.rcv_buffer.read().await.get_available_buf_size(),
             ),
             connection_type: 1,
             socket_type: self.socket_type,
@@ -869,6 +923,10 @@ impl UdtSocket {
         self.send_to(&addr, hs_packet.into()).await?;
 
         Ok(())
+    }
+
+    pub async fn status(&self) -> UdtStatus {
+        *self.status.read().await
     }
 }
 
@@ -892,7 +950,7 @@ impl PartialEq for UdtSocket {
 
 impl Eq for UdtSocket {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum UdtStatus {
     Init,
     Opened,

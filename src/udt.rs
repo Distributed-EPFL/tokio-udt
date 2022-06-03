@@ -46,7 +46,7 @@ impl Udt {
     pub(crate) async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
         if let Some(lock) = self.sockets.get(&socket_id) {
             let socket = lock.read().await;
-            if socket.status != UdtStatus::Closed {
+            if socket.status().await != UdtStatus::Closed {
                 return Some(lock.clone());
             }
         }
@@ -54,7 +54,7 @@ impl Udt {
     }
 
     pub(crate) async fn get_peer_socket(
-        &mut self,
+        &self,
         peer: SocketAddr,
         socket_id: SocketId,
         initial_seq_number: SeqNumber,
@@ -87,7 +87,7 @@ impl Udt {
 
     pub(crate) async fn new_connection(
         &mut self,
-        listener_socket_id: SocketId,
+        listener_socket: &UdtSocket,
         peer: SocketAddr,
         hs: &HandShakeInfo,
     ) -> Result<()> {
@@ -95,10 +95,10 @@ impl Udt {
             .get_peer_socket(peer, hs.socket_id, hs.initial_seq_number)
             .await
         {
-            let mut socket = existing_peer_socket.write().await;
-            if socket.status == UdtStatus::Broken {
+            let socket = existing_peer_socket.read().await;
+            if socket.status().await == UdtStatus::Broken {
                 // last connection from the "peer" address has been broken
-                socket.status = UdtStatus::Closed;
+                *socket.status.write().await = UdtStatus::Closed;
                 /*  TODO:
                     Set timestamp? and remove from queued sockets and accept sockets?
                 */
@@ -113,29 +113,22 @@ impl Udt {
 
         let new_socket_id = self.get_new_socket_id();
 
-        let listener_socket = self
-            .sockets
-            .get(&listener_socket_id)
-            .ok_or_else(|| Error::new(ErrorKind::Other, "Failed to find listener socket"))?
-            .clone();
-
         let new_socket = {
-            let listener_socket = listener_socket.write().await;
-
             let multiplexer = listener_socket
                 .multiplexer
                 .upgrade()
                 .ok_or_else(|| Error::new(ErrorKind::Other, "Listener has no multiplexer"))?;
 
-            if listener_socket.backlog_size >= listener_socket.queued_sockets.len() {
+            if listener_socket.queued_sockets.read().await.len() >= listener_socket.backlog_size {
                 return Err(Error::new(ErrorKind::Other, "Too many queued sockets"));
             }
 
-            let mut new_socket =
+            let new_socket =
                 UdtSocket::new(new_socket_id, hs.socket_type, Some(hs.initial_seq_number))
                     .with_peer(peer, hs.socket_id)
-                    .with_listen_socket(listener_socket_id, multiplexer);
-            new_socket.open();
+                    .await
+                    .with_listen_socket(listener_socket.socket_id, multiplexer);
+            new_socket.open().await;
             new_socket
         };
 
@@ -143,19 +136,15 @@ impl Udt {
         let ns_isn = new_socket.initial_seq_number;
         let ns_peer_socket_id = hs.socket_id;
         let new_socket_ref = new_socket.connect_on_handshake(peer, hs.clone()).await?;
+
         self.peers
             .entry((ns_peer_socket_id, ns_isn))
             .or_default()
             .insert(new_socket_ref.read().await.socket_id);
         self.sockets.insert(ns_id, new_socket_ref);
 
-        {
-            let mut listener_socket = listener_socket.write().await;
-            listener_socket.queued_sockets.insert(ns_id);
-            listener_socket.accept_notify.notify_one();
-        }
-
-        // TODO: Trigger event?
+        listener_socket.queued_sockets.write().await.insert(ns_id);
+        listener_socket.accept_notify.notify_one();
         Ok(())
     }
 
@@ -167,12 +156,12 @@ impl Udt {
 
         let mut socket = socket.write().await;
 
-        if socket.status != UdtStatus::Init {
+        if socket.status().await != UdtStatus::Init {
             return Err(Error::new(ErrorKind::Other, "socket already binded"));
         }
 
         self.update_mux(&mut socket, Some(addr)).await?;
-        socket.open();
+        socket.open().await;
         Ok(())
     }
 
@@ -186,7 +175,8 @@ impl Udt {
                 let port = bind_addr.port();
                 for m in self.multiplexers.values() {
                     let mux = m.read().await;
-                    if mux.reusable && mux.port == port && mux.mss == socket.configuration.mss {
+                    let socket_mss = socket.configuration.read().await.mss;
+                    if mux.reusable && mux.port == port && mux.mss == socket_mss {
                         socket.set_multiplexer(m);
                         return Ok(());
                     }
@@ -195,16 +185,18 @@ impl Udt {
         }
 
         // A new multiplexer is needed
-        let (mux_id, mux) = if let Some(bind_addr) = bind_addr {
-            UdtMultiplexer::bind(socket.socket_id, bind_addr, &socket.configuration).await?
-        } else {
-            UdtMultiplexer::new(socket.socket_id, &socket.configuration).await?
+        let mux = {
+            let configuration = socket.configuration.read().await;
+            let (mux_id, mux) = if let Some(bind_addr) = bind_addr {
+                UdtMultiplexer::bind(socket.socket_id, bind_addr, &configuration).await?
+            } else {
+                UdtMultiplexer::new(socket.socket_id, &configuration).await?
+            };
+            self.multiplexers.insert(mux_id, mux.clone());
+            mux
         };
-        self.multiplexers.insert(mux_id, mux.clone());
         socket.set_multiplexer(&mux);
-        tokio::spawn(async move {
-            UdtMultiplexer::run(mux).await;
-        });
+        UdtMultiplexer::run(mux);
         Ok(())
     }
 }

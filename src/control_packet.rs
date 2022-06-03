@@ -132,6 +132,7 @@ impl UdtControlPacket {
         let additional_info = u32::from_be_bytes(raw[4..8].try_into().unwrap());
         let timestamp = u32::from_be_bytes(raw[8..12].try_into().unwrap());
         let dest_socket_id = u32::from_be_bytes(raw[12..16].try_into().unwrap());
+
         let packet_type = ControlPacketType::deserialize(raw)?;
         Ok(Self {
             reserved,
@@ -172,6 +173,9 @@ impl ControlPacketType {
     pub fn control_info_field(&self) -> Vec<u8> {
         match self {
             Self::Handshake(hs) => hs.serialize(),
+            Self::Ack(ack) => ack.serialize(),
+            Self::Nak(nak) => nak.serialize(),
+            Self::MsgDropRequest(drop) => drop.serialize(),
             // TODO serialize ACK, NAK and MessageDrop
             _ => vec![],
         }
@@ -292,6 +296,23 @@ impl AckInfo {
             info: Some(info),
         })
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        match &self.info {
+            None => self.next_seq_number.number().to_be_bytes().to_vec(),
+            Some(extra) => [
+                self.next_seq_number.number(),
+                extra.rtt,
+                extra.rtt_variance,
+                extra.available_buf_size,
+                extra.pack_recv_rate,
+                extra.link_capacity,
+            ]
+            .iter()
+            .flat_map(|v| v.to_be_bytes())
+            .collect(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -322,6 +343,13 @@ impl NakInfo {
             .collect();
         Ok(Self { loss_info: losses })
     }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.loss_info
+            .iter()
+            .flat_map(|x| x.to_be_bytes())
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -339,5 +367,15 @@ impl DropRequestInfo {
             first_seq_number: get_u32(0).into(),
             last_seq_number: get_u32(1).into(),
         })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        [
+            self.first_seq_number.number(),
+            self.last_seq_number.number(),
+        ]
+        .iter()
+        .flat_map(|x| x.to_be_bytes())
+        .collect()
     }
 }

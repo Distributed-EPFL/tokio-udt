@@ -22,16 +22,18 @@ impl RcvLossList {
             return;
         }
 
-        let mut keys_to_remove = vec![];
-        for (key, (start, end)) in self.sequences.range_mut((n1 + 1)..=n2) {
-            if *end > n2 {
-                *start = n2 + 1;
-            } else {
-                keys_to_remove.push(*key);
+        if n2.number() > n1.number() {
+            let mut keys_to_remove = vec![];
+            for (key, (start, end)) in self.sequences.range_mut((n1 + 1)..=n2) {
+                if *end > n2 {
+                    *start = n2 + 1;
+                } else {
+                    keys_to_remove.push(*key);
+                }
             }
-        }
-        for key in keys_to_remove {
-            self.sequences.remove(&key);
+            for key in keys_to_remove {
+                self.sequences.remove(&key);
+            }
         }
 
         if let Some((_, (_start, end))) = self.sequences.range_mut(..=n1).next_back() {

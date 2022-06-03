@@ -20,7 +20,7 @@ pub struct UdtMultiplexer {
 
     pub(crate) snd_queue: UdtSndQueue,
     pub(crate) rcv_queue: UdtRcvQueue,
-    pub listener: Option<SocketRef>,
+    pub listener: RwLock<Option<SocketRef>>,
 }
 
 impl UdtMultiplexer {
@@ -38,7 +38,7 @@ impl UdtMultiplexer {
             channel: channel.clone(),
             snd_queue: UdtSndQueue::new(),
             rcv_queue: UdtRcvQueue::new(channel, config.mss),
-            listener: None,
+            listener: RwLock::new(None),
         };
 
         let lock = Arc::new(RwLock::new(mux));
@@ -64,7 +64,7 @@ impl UdtMultiplexer {
             channel: channel.clone(),
             snd_queue: UdtSndQueue::new(),
             rcv_queue: UdtRcvQueue::new(channel, config.mss),
-            listener: None,
+            listener: RwLock::new(None),
         };
 
         let lock = Arc::new(RwLock::new(mux));
@@ -83,9 +83,9 @@ impl UdtMultiplexer {
             .expect("failed to retrieve udp local addr")
     }
 
-    pub async fn run(mux: Arc<RwLock<Self>>) {
+    pub fn run(mux: Arc<RwLock<Self>>) {
         let mux2 = mux.clone();
-        tokio::spawn(async move { mux.read_owned().await.rcv_queue.worker().await });
-        tokio::spawn(async move { mux2.read_owned().await.snd_queue.worker().await });
+        tokio::spawn(async move { mux.read_owned().await.rcv_queue.worker().await.unwrap() });
+        tokio::spawn(async move { mux2.read_owned().await.snd_queue.worker().await.unwrap() });
     }
 }

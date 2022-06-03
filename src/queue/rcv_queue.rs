@@ -7,7 +7,8 @@ use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{Duration, Instant};
+use tokio_timerfd::sleep;
 
 const TIMERS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(100);
@@ -50,10 +51,8 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
+        let mut buf = vec![0_u8; self.payload_size as usize];
         loop {
-            // TODO: drop packet if no space in packets
-
-            let mut buf = vec![0_u8; self.payload_size as usize];
             if let Some((size, addr)) = tokio::select! {
                 r = self.channel.recv_from(&mut buf) => Some(r?),
                 _ = sleep(UDP_RCV_TIMEOUT) => None,
@@ -64,7 +63,8 @@ impl UdtRcvQueue {
                     if let Some(handshake) = packet.handshake() {
                         if let Some(lock) = self.multiplexer.upgrade() {
                             let mux = lock.read().await;
-                            if let Some(listener) = &mux.listener {
+                            let listener = mux.listener.read().await;
+                            if let Some(listener) = &*listener {
                                 listener
                                     .read()
                                     .await
@@ -85,10 +85,10 @@ impl UdtRcvQueue {
                     // }
 
                     if let Some(socket) = Udt::get().read().await.get_socket(socket_id).await {
-                        let mut socket = socket.write().await;
+                        let socket = socket.read().await;
                         if socket.peer_addr == Some(addr)
                             && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
-                                .contains(&socket.status)
+                                .contains(&socket.status().await)
                         {
                             socket.process_packet(packet).await?;
                             socket.check_timers().await;
@@ -111,7 +111,7 @@ impl UdtRcvQueue {
                 .take_while(|(ts, _)| ts.elapsed() > TIMERS_CHECK_INTERVAL)
             {
                 if let Some(lock) = Udt::get().read().await.get_socket(*socket_id).await {
-                    let mut socket = lock.write().await;
+                    let socket = lock.read().await;
                     socket.check_timers().await;
                 }
             }

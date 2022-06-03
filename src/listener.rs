@@ -15,7 +15,7 @@ impl UdtListener {
             udt.new_socket(SocketType::Stream)?.clone()
         };
 
-        if socket.read().await.configuration.rendezvous {
+        if socket.read().await.configuration.read().await.rendezvous {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "listen is not supported in rendezvous connection setup",
@@ -33,13 +33,17 @@ impl UdtListener {
             let socket_ref = socket.clone();
             let mut socket = socket.write().await;
             socket.backlog_size = backlog;
+
             let mux_lock = socket
                 .multiplexer
                 .upgrade()
                 .expect("multiplexer is not initialized");
-            let mut mux = mux_lock.write().await;
-            mux.listener = Some(socket_ref);
-            socket.status = UdtStatus::Listening;
+
+            let mux = mux_lock.read().await;
+            *mux.listener.write().await = Some(socket_ref);
+            *socket.status.write().await = UdtStatus::Listening;
+
+            println!("Now listening on {:?}", bind_addr);
         }
 
         Ok(Self { socket })
@@ -48,7 +52,7 @@ impl UdtListener {
     pub async fn accept(&self) -> Result<(SocketAddr, UdtConnection)> {
         {
             let socket = self.socket.read().await;
-            if socket.configuration.rendezvous {
+            if socket.configuration.read().await.rendezvous {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "no 'accept' in rendezvous connection setup",
@@ -58,19 +62,19 @@ impl UdtListener {
 
         let accepted_socket_id = loop {
             {
-                let mut socket = self.socket.write().await;
-                if socket.status != UdtStatus::Listening {
+                let socket = self.socket.read().await;
+                if socket.status().await != UdtStatus::Listening {
                     return Err(Error::new(
                         ErrorKind::Other,
                         "socket is not in listening state",
                     ));
                 }
 
-                println!("Nb queued_sockets: {}", socket.queued_sockets.len());
+                let mut queue = socket.queued_sockets.write().await;
 
-                if let Some(socket_id) = socket.queued_sockets.iter().next() {
+                if let Some(socket_id) = queue.iter().next() {
                     let socket_id = *socket_id;
-                    socket.queued_sockets.remove(&socket_id);
+                    queue.remove(&socket_id);
                     break socket_id;
                 }
             }

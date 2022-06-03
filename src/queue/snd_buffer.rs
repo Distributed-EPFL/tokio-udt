@@ -3,6 +3,7 @@ use crate::seq_number::MsgNumber;
 use crate::seq_number::SeqNumber;
 use crate::socket::SocketId;
 use std::collections::VecDeque;
+use tokio::io::{Error, ErrorKind, Result as IoResult};
 use tokio::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -45,6 +46,7 @@ impl SndBufferBlock {
 
 #[derive(Debug)]
 pub(crate) struct SndBuffer {
+    max_size: u32,
     buffer: VecDeque<SndBufferBlock>,
     mss: u32,
     next_msg_number: MsgNumber,
@@ -52,8 +54,9 @@ pub(crate) struct SndBuffer {
 }
 
 impl SndBuffer {
-    pub fn new(mss: u32) -> Self {
+    pub fn new(max_size: u32, mss: u32) -> Self {
         Self {
+            max_size,
             buffer: VecDeque::new(),
             mss,
             next_msg_number: MsgNumber::zero(),
@@ -61,11 +64,16 @@ impl SndBuffer {
         }
     }
 
-    pub fn add_message(&mut self, data: &[u8], ttl: Option<u64>, in_order: bool) {
+    pub fn add_message(&mut self, data: &[u8], ttl: Option<u64>, in_order: bool) -> IoResult<()> {
         let msg_number = self.next_msg_number;
         let now = Instant::now();
         let chunks = data.chunks(self.mss as usize);
         let chunks_len = chunks.len();
+
+        if self.buffer.len() + chunks_len > self.max_size as usize {
+            return Err(Error::new(ErrorKind::OutOfMemory, "Send buffer is full"));
+        }
+
         self.buffer
             .extend(chunks.enumerate().map(|(idx, chunk)| SndBufferBlock {
                 data: chunk.into(),
@@ -86,6 +94,7 @@ impl SndBuffer {
                 },
             }));
         self.next_msg_number = self.next_msg_number + 1;
+        Ok(())
     }
 
     pub fn ack_data(&mut self, offset: i32) {
