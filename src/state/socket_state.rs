@@ -1,6 +1,6 @@
 use crate::ack_window::AckWindow;
 use crate::configuration::UdtConfiguration;
-use crate::loss_list::RcvLossList;
+use crate::loss_list::LossList;
 use crate::seq_number::{AckSeqNumber, SeqNumber};
 use crate::socket::SYN_INTERVAL;
 use tokio::time::{Duration, Instant};
@@ -14,7 +14,7 @@ pub(crate) struct SocketState {
     pub last_sent_ack_time: Instant,
     pub curr_rcv_seq_number: SeqNumber,
     pub last_ack_seq_number: AckSeqNumber,
-    pub rcv_loss_list: RcvLossList,
+    pub rcv_loss_list: LossList,
     pub last_ack2_received: SeqNumber,
 
     // Sending related
@@ -23,7 +23,7 @@ pub(crate) struct SocketState {
     pub last_ack2_sent_back: AckSeqNumber,
     pub curr_snd_seq_number: SeqNumber,
     pub last_ack2_time: Instant,
-    pub snd_loss_list: RcvLossList,
+    pub snd_loss_list: LossList,
 
     pub next_ack_time: Instant,
     pub interpacket_interval: Duration,
@@ -41,7 +41,7 @@ impl SocketState {
         Self {
             last_rsp_time: now,
             last_ack_seq_number: AckSeqNumber::zero(),
-            rcv_loss_list: RcvLossList::new(configuration.flight_flag_size),
+            rcv_loss_list: LossList::new(configuration.flight_flag_size),
             curr_rcv_seq_number: isn - 1,
 
             next_ack_time: now + SYN_INTERVAL,
@@ -59,7 +59,7 @@ impl SocketState {
             last_ack2_sent_back: isn.number().into(),
             last_ack2_time: now,
             last_data_ack_processed: isn,
-            snd_loss_list: RcvLossList::new(configuration.flight_flag_size * 2),
+            snd_loss_list: LossList::new(configuration.flight_flag_size * 2),
             ack_window: AckWindow::new(1024),
         }
     }

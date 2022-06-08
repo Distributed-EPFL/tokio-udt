@@ -2,12 +2,12 @@ use crate::seq_number::SeqNumber;
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
-pub(crate) struct RcvLossList {
+pub(crate) struct LossList {
     sequences: BTreeMap<SeqNumber, (SeqNumber, SeqNumber)>,
     max_size: u32,
 }
 
-impl RcvLossList {
+impl LossList {
     pub fn new(max_size: u32) -> Self {
         Self {
             sequences: BTreeMap::new(),
@@ -22,13 +22,13 @@ impl RcvLossList {
             return;
         }
 
+        let mut n2 = n2;
         if n2.number() > n1.number() {
             let mut keys_to_remove = vec![];
-            for (key, (start, end)) in self.sequences.range_mut((n1 + 1)..=n2) {
+            for (key, (_start, end)) in self.sequences.range((n1 + 1)..=n2) {
+                keys_to_remove.push(*key);
                 if *end > n2 {
-                    *start = n2 + 1;
-                } else {
-                    keys_to_remove.push(*key);
+                    n2 = *end;
                 }
             }
             for key in keys_to_remove {
@@ -37,15 +37,12 @@ impl RcvLossList {
         }
 
         if let Some((_, (_start, end))) = self.sequences.range_mut(..=n1).next_back() {
-            if *end == n1 - 1 {
-                *end = n2;
+            if *end >= n1 - 1 {
+                *end = std::cmp::max(*end, n2);
                 return;
             }
         }
-        self.sequences
-            .entry(n1)
-            .and_modify(|(_start, end)| *end = std::cmp::max(*end, n2))
-            .or_insert((n1, n2));
+        self.sequences.insert(n1, (n1, n2));
     }
 
     pub fn remove(&mut self, num: SeqNumber) {
@@ -161,4 +158,85 @@ impl RcvLossList {
         }
         None
     }
+}
+
+#[test]
+fn test_insert_sequences() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(5.into(), 10.into());
+    loss_list.insert(1.into(), 2.into());
+    assert_eq!(loss_list.sequences.len(), 2);
+
+    let items: Vec<_> = loss_list.sequences.clone().into_iter().collect();
+    assert_eq!(
+        items,
+        [
+            (1.into(), (1.into(), 2.into())),
+            (5.into(), (5.into(), 10.into())),
+        ]
+    );
+
+    assert_eq!(loss_list.peek_after(1.into()), Some(1.into()));
+    assert_eq!(loss_list.peek_after(4.into()), Some(5.into()));
+    assert_eq!(loss_list.peek_after(10.into()), Some(10.into()));
+    assert_eq!(loss_list.peek_after(11.into()), Some(1.into()));
+}
+
+#[test]
+fn test_insert_overlapping_sequence() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(1.into(), 10.into());
+    loss_list.insert(5.into(), 20.into());
+    assert_eq!(loss_list.sequences.len(), 1);
+    let items: Vec<_> = loss_list.sequences.into_iter().collect();
+    assert_eq!(items, [(1.into(), (1.into(), 20.into())),]);
+}
+
+#[test]
+fn test_insert_with_multiple_overlapping_sequences() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(6.into(), 10.into());
+    loss_list.insert(12.into(), 25.into());
+    loss_list.insert(1.into(), 22.into());
+    assert_eq!(loss_list.sequences.len(), 1);
+    let items: Vec<_> = loss_list.sequences.into_iter().collect();
+    assert_eq!(items, [(1.into(), (1.into(), 25.into())),]);
+}
+
+#[test]
+fn test_insert_with_bigger_existing_sequence() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(10.into(), 30.into());
+    loss_list.insert(10.into(), 20.into());
+    assert_eq!(loss_list.sequences.len(), 1);
+    let items: Vec<_> = loss_list.sequences.into_iter().collect();
+    assert_eq!(items, [(10.into(), (10.into(), 30.into())),]);
+}
+
+#[test]
+fn test_remove_seq_inside_sequence() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(1.into(), 10.into());
+    loss_list.remove(5.into());
+
+    assert_eq!(loss_list.sequences.len(), 2);
+    let items: Vec<_> = loss_list.sequences.into_iter().collect();
+    assert_eq!(
+        items,
+        [
+            (1.into(), (1.into(), 4.into())),
+            (6.into(), (6.into(), 10.into())),
+        ]
+    );
+}
+
+#[test]
+fn test_remove_first_item() {
+    let mut loss_list = crate::loss_list::LossList::new(1000);
+    loss_list.insert(1.into(), 10.into());
+    loss_list.remove(1.into());
+
+    assert_eq!(loss_list.sequences.len(), 1);
+    let items: Vec<_> = loss_list.sequences.into_iter().collect();
+    assert_eq!(items, [(2.into(), (2.into(), 10.into())),]);
 }

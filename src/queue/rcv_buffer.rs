@@ -2,7 +2,7 @@ use crate::data_packet::UdtDataPacket;
 use crate::seq_number::{MsgNumber, SeqNumber};
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use tokio::io::{Error, ErrorKind, Result};
+use tokio::io::Result;
 
 #[derive(Debug)]
 pub(crate) struct RcvBuffer {
