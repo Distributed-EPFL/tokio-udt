@@ -15,19 +15,18 @@ async fn main() {
 
     let mut buffer = [0; 2048];
     let mut last = Instant::now();
-    let mut count = 0;
+    let mut bytes = 0;
 
     loop {
         let size = connection.recv(&mut buffer).await.unwrap();
 
         if size > 0 {
-            count += 1;
+            bytes += size;
         }
 
         if last.elapsed() > Duration::new(1, 0) {
             last = Instant::now();
-
-            println!("Received {} packets (size is {})", count, size);
+            println!("Received {} MB", bytes as f64 / 1e6);
         }
     }
 }

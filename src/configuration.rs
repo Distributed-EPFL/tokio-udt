@@ -5,8 +5,6 @@ const UDT_VERSION: u32 = 4;
 #[derive(Debug)]
 pub struct UdtConfiguration {
     pub mss: u32,
-    // syn_sending: bool,
-    // syn_recving: bool,
     pub flight_flag_size: u32,
     pub snd_buf_size: u32,
     pub rcv_buf_size: u32,
@@ -31,11 +29,9 @@ impl Default for UdtConfiguration {
     fn default() -> Self {
         Self {
             mss: DEFAULT_MSS,
-            // syn_sending: true,
-            // syn_recving: true,
             flight_flag_size: 25600,
             snd_buf_size: DEFAULT_UDT_BUF_SIZE,
-            rcv_buf_size: DEFAULT_UDT_BUF_SIZE,
+            rcv_buf_size: DEFAULT_UDT_BUF_SIZE * 2,
             udp_snd_buf_size: 65536,
             udp_rcv_buf_size: DEFAULT_MSS as u32 * DEFAULT_UDT_BUF_SIZE,
             linger_timeout: Some(180),

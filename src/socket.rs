@@ -458,11 +458,11 @@ impl UdtSocket {
                         self.flow
                             .write()
                             .await
-                            .update_rtt(Duration::from_millis(extra.rtt.into()));
+                            .update_rtt(Duration::from_micros(extra.rtt.into()));
                         self.flow
                             .write()
                             .await
-                            .update_rtt_var(Duration::from_millis(extra.rtt_variance.into()));
+                            .update_rtt_var(Duration::from_micros(extra.rtt_variance.into()));
                         if extra.pack_recv_rate > 0 {
                             self.flow
                                 .write()
@@ -502,9 +502,9 @@ impl UdtSocket {
                 let loss_iter = &mut nak.loss_info.iter();
                 while let Some(loss) = loss_iter.next() {
                     let (seq_start, seq_end) = {
-                        if loss & 0x8000000 != 0 {
+                        if loss & 0x8000_0000 != 0 {
                             if let Some(seq_end) = loss_iter.next() {
-                                let seq_start: SeqNumber = (loss & 0x7fffffff).into();
+                                let seq_start: SeqNumber = (loss & 0x7fff_ffff).into();
                                 let seq_end: SeqNumber = (*seq_end).into();
                                 (seq_start, seq_end)
                             } else {
@@ -579,7 +579,8 @@ impl UdtSocket {
         // recv_total++
         let offset = seq_number - state.last_sent_ack;
         if offset < 0 {
-            return Err(Error::new(ErrorKind::InvalidData, "seq number is too late"));
+            // eprintln!!("seq number is too late");
+            return Ok(());
         }
         if self.rcv_buffer.read().await.get_available_buf_size() < offset as u32 {
             return Err(Error::new(
@@ -590,11 +591,7 @@ impl UdtSocket {
 
         let payload_len = packet.payload_len();
         self.rcv_buffer.write().await.insert(packet)?;
-        if seq_number > state.curr_rcv_seq_number + 1 {
-            println!("lost packets?");
-            println!("seq_number {:?}", seq_number);
-            println!("curr_recv_seq_number {:?}", state.curr_rcv_seq_number);
-
+        if (seq_number - state.curr_rcv_seq_number) > 1 {
             // some packets have been lost in between
             let curr_rcv_seq_number = state.curr_rcv_seq_number;
             state
@@ -607,7 +604,7 @@ impl UdtSocket {
                     vec![(seq_number - 1).number()]
                 } else {
                     vec![
-                        (state.curr_rcv_seq_number + 1).number() | 0x80000000,
+                        (state.curr_rcv_seq_number + 1).number() | 0x8000_0000,
                         (seq_number - 1).number(),
                     ]
                 }

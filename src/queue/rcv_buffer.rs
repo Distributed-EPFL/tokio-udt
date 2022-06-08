@@ -29,10 +29,13 @@ impl RcvBuffer {
     pub fn insert(&mut self, packet: UdtDataPacket) -> Result<()> {
         let seq_number = packet.header.seq_number;
         match self.packets.entry(seq_number) {
-            Entry::Occupied(_) => Err(Error::new(
-                ErrorKind::AlreadyExists,
-                "a packet with the same seq number is present in buffer",
-            )),
+            Entry::Occupied(_) => {
+                // eprintln!(
+                //     "a packet with the same seq number {} is present in buffer",
+                //     seq_number.number()
+                // );
+                Ok(())
+            }
             Entry::Vacant(e) => {
                 e.insert(packet);
                 Ok(())
