@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::{Duration, Instant};
 
 pub(crate) const SYN_INTERVAL: Duration = Duration::from_millis(10);
@@ -67,7 +67,7 @@ pub struct UdtSocket {
     // self_ip: Option<IpAddr>,
     start_time: Instant,
 
-    state: RwLock<SocketState>,
+    state: Mutex<SocketState>,
 
     rcv_notify: Notify,
 }
@@ -105,7 +105,7 @@ impl UdtSocket {
             // self_ip: None,
             start_time: now,
 
-            state: RwLock::new(SocketState::new(initial_seq_number, &configuration)),
+            state: Mutex::new(SocketState::new(initial_seq_number, &configuration)),
             rcv_notify: Notify::new(),
             configuration: RwLock::new(configuration),
         }
@@ -202,7 +202,7 @@ impl UdtSocket {
         let now = Instant::now();
         let mut probe = false;
 
-        let mut state = self.state.write().await;
+        let mut state = self.state.lock().await;
         let last_data_ack_processed = state.last_data_ack_processed;
         let packet = match state.snd_loss_list.pop_after(last_data_ack_processed) {
             Some(seq) => {
@@ -363,7 +363,7 @@ impl UdtSocket {
     }
 
     async fn process_ctrl(&self, packet: UdtControlPacket) -> Result<()> {
-        let mut state = self.state.write().await;
+        let mut state = self.state.lock().await;
         state.exp_count = 1;
         state.last_rsp_time = Instant::now();
 
@@ -556,7 +556,7 @@ impl UdtSocket {
     }
 
     async fn process_data(&self, packet: UdtDataPacket) -> Result<()> {
-        let mut state = self.state.write().await;
+        let mut state = self.state.lock().await;
         state.last_rsp_time = Instant::now();
 
         // CC onPktReceived
@@ -725,7 +725,7 @@ impl UdtSocket {
     pub(crate) async fn check_timers(&self) {
         self.cc_update();
         let now = Instant::now();
-        let mut state = self.state.write().await;
+        let mut state = self.state.lock().await;
         if now > state.next_ack_time {
             // TODO: use CC ack interval too
             self.send_ack(&mut state, false)
@@ -818,7 +818,7 @@ impl UdtSocket {
 
         if self.snd_buffer.read().await.is_empty() {
             // delay the EXP timer to avoid mis-fired timeout
-            self.state.write().await.last_rsp_time = Instant::now();
+            self.state.lock().await.last_rsp_time = Instant::now();
         }
 
         self.snd_buffer

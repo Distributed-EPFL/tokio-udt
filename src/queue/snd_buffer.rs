@@ -76,7 +76,7 @@ impl SndBuffer {
 
         self.buffer
             .extend(chunks.enumerate().map(|(idx, chunk)| SndBufferBlock {
-                data: chunk.into(),
+                data: chunk.to_vec(),
                 msg_number,
                 origin_time: now,
                 ttl,

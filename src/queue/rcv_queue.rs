@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
 
@@ -15,7 +15,7 @@ const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(100);
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
-    sockets: RwLock<VecDeque<(Instant, SocketId)>>,
+    sockets: Mutex<VecDeque<(Instant, SocketId)>>,
     payload_size: u32,
     channel: Arc<UdpSocket>,
     multiplexer: Weak<RwLock<UdtMultiplexer>>,
@@ -24,7 +24,7 @@ pub(crate) struct UdtRcvQueue {
 impl UdtRcvQueue {
     pub fn new(channel: Arc<UdpSocket>, payload_size: u32) -> Self {
         Self {
-            sockets: RwLock::new(VecDeque::new()),
+            sockets: Mutex::new(VecDeque::new()),
             payload_size,
             channel,
             multiplexer: Weak::new(),
@@ -33,16 +33,13 @@ impl UdtRcvQueue {
 
     pub async fn push_back(&self, socket_id: SocketId) {
         self.sockets
-            .write()
+            .lock()
             .await
             .push_back((Instant::now(), socket_id));
     }
 
     pub async fn update(&self, socket_id: SocketId) {
-        self.sockets
-            .write()
-            .await
-            .retain(|(_, id)| socket_id != *id);
+        self.sockets.lock().await.retain(|(_, id)| socket_id != *id);
         self.push_back(socket_id).await;
     }
 
@@ -105,7 +102,7 @@ impl UdtRcvQueue {
 
             for (_, socket_id) in self
                 .sockets
-                .read()
+                .lock()
                 .await
                 .iter()
                 .take_while(|(ts, _)| ts.elapsed() > TIMERS_CHECK_INTERVAL)
