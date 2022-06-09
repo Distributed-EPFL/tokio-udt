@@ -1,4 +1,4 @@
-use crate::socket::SocketType;
+use crate::socket::{SocketType, UdtStatus};
 use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use tokio::io::Result;
@@ -21,9 +21,22 @@ impl UdtConnection {
             let mut socket = socket.write().await;
             socket.connect(addr).await?;
         }
-        Ok(Self {
+        let connection = Self {
             socket: socket.clone(),
-        })
+        };
+        loop {
+            if connection.socket.read().await.status().await == UdtStatus::Connected {
+                break;
+            }
+            connection
+                .socket
+                .read()
+                .await
+                .connect_notify
+                .notified()
+                .await;
+        }
+        Ok(connection)
     }
 
     pub async fn send(&self, msg: &[u8]) -> Result<()> {

@@ -11,15 +11,15 @@ async fn main() {
         .await
         .unwrap();
 
+    println!("Connected!");
+
     let buffer: Vec<u8> = std::iter::repeat(b"Hello World!")
-        .take(10000)
+        .take(30000)
         .flat_map(|b| *b)
         .collect();
     println!("Message length: {}", buffer.len());
 
     let mut last = Instant::now();
-
-    sleep(Duration::from_secs(3)).await;
     let mut count = 0;
 
     loop {

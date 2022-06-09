@@ -69,6 +69,7 @@ pub struct UdtSocket {
 
     state: Mutex<SocketState>,
 
+    pub(crate) connect_notify: Notify,
     rcv_notify: Notify,
 }
 
@@ -106,6 +107,7 @@ impl UdtSocket {
             start_time: now,
 
             state: Mutex::new(SocketState::new(initial_seq_number, &configuration)),
+            connect_notify: Notify::new(),
             rcv_notify: Notify::new(),
             configuration: RwLock::new(configuration),
         }
@@ -401,6 +403,7 @@ impl UdtSocket {
 
                     // TODO: init CC
                     *self.status.write().await = UdtStatus::Connected;
+                    self.connect_notify.notify_waiters();
                 }
             }
             ControlPacketType::KeepAlive => (),
