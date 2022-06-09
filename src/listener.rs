@@ -12,17 +12,17 @@ impl UdtListener {
     pub async fn bind(bind_addr: SocketAddr, backlog: usize) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
-            udt.new_socket(SocketType::Stream)?.clone()
+            udt.new_socket(SocketType::Stream, backlog)?.clone()
         };
 
-        if socket.read().await.configuration.read().await.rendezvous {
+        if socket.configuration.read().await.rendezvous {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "listen is not supported in rendezvous connection setup",
             ));
         }
 
-        let socket_id = socket.read().await.socket_id;
+        let socket_id = socket.socket_id;
 
         {
             let mut udt = Udt::get().write().await;
@@ -31,17 +31,11 @@ impl UdtListener {
 
         {
             let socket_ref = socket.clone();
-            let mut socket = socket.write().await;
-            socket.backlog_size = backlog;
-
-            let mux_lock = socket
-                .multiplexer
-                .upgrade()
+            let mux = socket
+                .multiplexer()
                 .expect("multiplexer is not initialized");
-
-            let mux = mux_lock.read().await;
             *mux.listener.write().await = Some(socket_ref);
-            *socket.status.write().await = UdtStatus::Listening;
+            *socket.status.lock().unwrap() = UdtStatus::Listening;
 
             println!("Now listening on {:?}", bind_addr);
         }
@@ -51,8 +45,7 @@ impl UdtListener {
 
     pub async fn accept(&self) -> Result<(SocketAddr, UdtConnection)> {
         {
-            let socket = self.socket.read().await;
-            if socket.configuration.read().await.rendezvous {
+            if self.socket.configuration.read().await.rendezvous {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "no 'accept' in rendezvous connection setup",
@@ -62,26 +55,21 @@ impl UdtListener {
 
         let accepted_socket_id = loop {
             {
-                let socket = self.socket.read().await;
-                if socket.status().await != UdtStatus::Listening {
+                if self.socket.status() != UdtStatus::Listening {
                     return Err(Error::new(
                         ErrorKind::Other,
                         "socket is not in listening state",
                     ));
                 }
 
-                let mut queue = socket.queued_sockets.write().await;
-
+                let mut queue = self.socket.queued_sockets.write().await;
                 if let Some(socket_id) = queue.iter().next() {
                     let socket_id = *socket_id;
                     queue.remove(&socket_id);
                     break socket_id;
                 }
             }
-            {
-                let socket = self.socket.read().await;
-                socket.accept_notify.notified().await;
-            }
+            self.socket.accept_notify.notified().await;
         };
 
         let udt = Udt::get().read().await;
@@ -92,7 +80,7 @@ impl UdtListener {
             )
         })?;
 
-        let peer_addr = accepted_socket.read().await.peer_addr.ok_or_else(|| {
+        let peer_addr = accepted_socket.peer_addr().ok_or_else(|| {
             Error::new(
                 ErrorKind::Other,
                 "unknown peer address for accepted connection",

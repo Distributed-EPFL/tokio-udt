@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) type SocketRef = Arc<RwLock<UdtSocket>>;
+pub(crate) type SocketRef = Arc<UdtSocket>;
 
 pub static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
 
@@ -19,7 +19,7 @@ pub static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
 pub struct Udt {
     sockets: BTreeMap<SocketId, SocketRef>,
     // closed_sockets: BTreeMap<SocketId, SocketRef>,
-    multiplexers: BTreeMap<MultiplexerId, Arc<RwLock<UdtMultiplexer>>>,
+    multiplexers: BTreeMap<MultiplexerId, Arc<UdtMultiplexer>>,
     next_socket_id: SocketId,
     pub configuration: UdtConfiguration,
     peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketId>>, // peer socket id -> local socket id
@@ -44,10 +44,9 @@ impl Udt {
     }
 
     pub(crate) async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
-        if let Some(lock) = self.sockets.get(&socket_id) {
-            let socket = lock.read().await;
-            if socket.status().await != UdtStatus::Closed {
-                return Some(lock.clone());
+        if let Some(socket) = self.sockets.get(&socket_id) {
+            if socket.status() != UdtStatus::Closed {
+                return Some(socket.clone());
             }
         }
         None
@@ -59,25 +58,29 @@ impl Udt {
         socket_id: SocketId,
         initial_seq_number: SeqNumber,
     ) -> Option<SocketRef> {
-        for socket_lock in self
+        for socket in self
             .peers
             .get(&(socket_id, initial_seq_number))?
             .iter()
             .filter_map(|id| self.sockets.get(id))
         {
-            let socket = socket_lock.read().await;
-            if socket.peer_addr == Some(peer) {
+            if socket.peer_addr() == Some(peer) {
                 return self.sockets.get(&socket.socket_id).cloned();
             }
         }
         None
     }
 
-    pub fn new_socket(&mut self, socket_type: SocketType) -> Result<&SocketRef> {
-        let socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None);
+    pub fn new_socket(
+        &mut self,
+        socket_type: SocketType,
+        backlog_size: usize,
+    ) -> Result<&SocketRef> {
+        let mut socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None);
+        socket.backlog_size = backlog_size;
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
-            return Ok(e.insert(Arc::new(RwLock::new(socket))));
+            return Ok(e.insert(Arc::new(socket)));
         }
         Err(Error::new(
             ErrorKind::AlreadyExists,
@@ -95,10 +98,10 @@ impl Udt {
             .get_peer_socket(peer, hs.socket_id, hs.initial_seq_number)
             .await
         {
-            let socket = existing_peer_socket.read().await;
-            if socket.status().await == UdtStatus::Broken {
+            let socket = existing_peer_socket;
+            if socket.status() == UdtStatus::Broken {
                 // last connection from the "peer" address has been broken
-                *socket.status.write().await = UdtStatus::Closed;
+                *socket.status.lock().unwrap() = UdtStatus::Closed;
                 /*  TODO:
                     Set timestamp? and remove from queued sockets and accept sockets?
                 */
@@ -116,6 +119,8 @@ impl Udt {
         let new_socket = {
             let multiplexer = listener_socket
                 .multiplexer
+                .lock()
+                .unwrap()
                 .upgrade()
                 .ok_or_else(|| Error::new(ErrorKind::Other, "Listener has no multiplexer"))?;
 
@@ -140,7 +145,7 @@ impl Udt {
         self.peers
             .entry((ns_peer_socket_id, ns_isn))
             .or_default()
-            .insert(new_socket_ref.read().await.socket_id);
+            .insert(new_socket_ref.socket_id);
         self.sockets.insert(ns_id, new_socket_ref);
 
         listener_socket.queued_sockets.write().await.insert(ns_id);
@@ -154,30 +159,27 @@ impl Udt {
             .await
             .ok_or_else(|| Error::new(ErrorKind::Other, "unknown socket id"))?;
 
-        let mut socket = socket.write().await;
-
-        if socket.status().await != UdtStatus::Init {
+        if socket.status() != UdtStatus::Init {
             return Err(Error::new(ErrorKind::Other, "socket already binded"));
         }
 
-        self.update_mux(&mut socket, Some(addr)).await?;
+        self.update_mux(&socket, Some(addr)).await?;
         socket.open().await;
         Ok(())
     }
 
     pub(crate) async fn update_mux(
         &mut self,
-        socket: &mut UdtSocket,
+        socket: &UdtSocket,
         bind_addr: Option<SocketAddr>,
     ) -> Result<()> {
         if self.configuration.reuse_addr {
             if let Some(bind_addr) = bind_addr {
                 let port = bind_addr.port();
-                for m in self.multiplexers.values() {
-                    let mux = m.read().await;
+                for mux in self.multiplexers.values() {
                     let socket_mss = socket.configuration.read().await.mss;
                     if mux.reusable && mux.port == port && mux.mss == socket_mss {
-                        socket.set_multiplexer(m);
+                        socket.set_multiplexer(mux);
                         return Ok(());
                     }
                 }

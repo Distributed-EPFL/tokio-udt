@@ -27,7 +27,7 @@ impl UdtMultiplexer {
     pub(crate) async fn new(
         id: MultiplexerId,
         config: &UdtConfiguration,
-    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer>>)> {
+    ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
         let channel = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
         let port = channel.local_addr()?.port();
         let mux = Self {
@@ -41,17 +41,16 @@ impl UdtMultiplexer {
             listener: RwLock::new(None),
         };
 
-        let lock = Arc::new(RwLock::new(mux));
-        let mut mux = lock.clone().write_owned().await;
-        mux.rcv_queue.set_multiplexer(&lock);
-        Ok((id, lock))
+        let mux = Arc::new(mux);
+        mux.rcv_queue.set_multiplexer(&mux);
+        Ok((id, mux))
     }
 
     pub(crate) async fn bind(
         id: MultiplexerId,
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
-    ) -> Result<(MultiplexerId, Arc<RwLock<UdtMultiplexer>>)> {
+    ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
         let port = bind_addr.port();
         let channel = Arc::new(UdpSocket::bind(bind_addr).await?);
         // TODO: set UDP sndBufSize and rcvBufSize ?
@@ -67,10 +66,9 @@ impl UdtMultiplexer {
             listener: RwLock::new(None),
         };
 
-        let lock = Arc::new(RwLock::new(mux));
-        let mut mux = lock.clone().write_owned().await;
-        mux.rcv_queue.set_multiplexer(&lock);
-        Ok((id, lock))
+        let mux = Arc::new(mux);
+        mux.rcv_queue.set_multiplexer(&mux);
+        Ok((id, mux))
     }
 
     pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {
@@ -83,9 +81,9 @@ impl UdtMultiplexer {
             .expect("failed to retrieve udp local addr")
     }
 
-    pub fn run(mux: Arc<RwLock<Self>>) {
+    pub fn run(mux: Arc<Self>) {
         let mux2 = mux.clone();
-        tokio::spawn(async move { mux.read_owned().await.rcv_queue.worker().await.unwrap() });
-        tokio::spawn(async move { mux2.read_owned().await.snd_queue.worker().await.unwrap() });
+        tokio::spawn(async move { mux.rcv_queue.worker().await.unwrap() });
+        tokio::spawn(async move { mux2.snd_queue.worker().await.unwrap() });
     }
 }

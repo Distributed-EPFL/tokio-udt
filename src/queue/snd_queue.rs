@@ -63,9 +63,9 @@ impl UdtSndQueue {
                 let next_node = { self.sockets.lock().await.pop() };
                 if let Some(node) = next_node {
                     if let Some(socket) = node.socket().await {
-                        if let Some((packet, ts)) = socket.read().await.next_data_packet().await? {
+                        if let Some((packet, ts)) = socket.next_data_packet().await? {
                             self.insert(ts, node.socket_id).await;
-                            socket.read().await.send_packet(packet.into()).await?;
+                            socket.send_packet(packet.into()).await?;
                         }
                     }
                 }

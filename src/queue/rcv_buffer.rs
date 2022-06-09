@@ -80,7 +80,7 @@ impl RcvBuffer {
                     )
             } else {
                 self.packets
-                    .range(self.next_to_read..SeqNumber::max())
+                    .range(self.next_to_read..=SeqNumber::max())
                     .chain(self.packets.range(SeqNumber::zero()..self.next_to_ack))
             }
         };

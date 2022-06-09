@@ -1,12 +1,10 @@
 use std::time::{Duration, Instant};
 use tokio::io::ErrorKind;
-use tokio::time::sleep;
+// use tokio::time::sleep;
 use tokio_udt::UdtConnection;
 
 #[tokio::main]
 async fn main() {
-    // console_subscriber::init();
-
     let connection = UdtConnection::connect("127.0.0.1:9000".parse().unwrap())
         .await
         .unwrap();
@@ -14,7 +12,7 @@ async fn main() {
     println!("Connected!");
 
     let buffer: Vec<u8> = std::iter::repeat(b"Hello World!")
-        .take(30000)
+        .take(10000)
         .flat_map(|b| *b)
         .collect();
     println!("Message length: {}", buffer.len());
