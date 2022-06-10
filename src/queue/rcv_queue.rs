@@ -48,6 +48,7 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
+        let mut last = Instant::now();
         let mut buf = vec![0_u8; self.payload_size as usize];
         loop {
             if let Some((size, addr)) = tokio::select! {
@@ -109,6 +110,11 @@ impl UdtRcvQueue {
                     socket.check_timers().await;
                 }
             }
+
+            // if last.elapsed() > Duration::new(1, 0) {
+            //     last = Instant::now();
+            //     println!("PING RCV");
+            // }
         }
     }
 }

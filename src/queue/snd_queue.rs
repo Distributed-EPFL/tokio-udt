@@ -3,8 +3,9 @@ use crate::udt::SocketRef;
 use crate::udt::Udt;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::sync::Mutex;
 use tokio::io::Result;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_timerfd::Delay;
 
@@ -52,19 +53,20 @@ impl UdtSndQueue {
     pub async fn worker(&self) -> Result<()> {
         loop {
             let next_timestamp = {
-                let sockets = self.sockets.lock().await;
+                let sockets = self.sockets.lock().unwrap();
                 sockets.peek().map(|n| n.timestamp)
             };
             if let Some(timestamp) = next_timestamp {
+
                 tokio::select! {
                    _ = Delay::new(timestamp.into_std())? => {}
                    _ = self.notify.notified() => {}
                 }
-                let next_node = { self.sockets.lock().await.pop() };
+                let next_node = { self.sockets.lock().unwrap().pop() };
                 if let Some(node) = next_node {
                     if let Some(socket) = node.socket().await {
                         if let Some((packet, ts)) = socket.next_data_packet().await? {
-                            self.insert(ts, node.socket_id).await;
+                            self.insert(ts, node.socket_id);
                             socket.send_packet(packet.into()).await?;
                         }
                     }
@@ -75,21 +77,22 @@ impl UdtSndQueue {
         }
     }
 
-    pub async fn insert(&self, ts: Instant, socket_id: SocketId) {
-        self.sockets.lock().await.push(SendQueueNode {
+    pub fn insert(&self, ts: Instant, socket_id: SocketId) {
+        let mut sockets = self.sockets.lock().unwrap();
+        sockets.push(SendQueueNode {
             socket_id,
             timestamp: ts,
         });
-        if let Some(node) = self.sockets.lock().await.peek() {
+        if let Some(node) = sockets.peek() {
             if node.socket_id == socket_id {
                 self.notify.notify_one();
             }
         }
     }
 
-    pub async fn update(&self, socket_id: SocketId, reschedule: bool) {
+    pub fn update(&self, socket_id: SocketId, reschedule: bool) {
         if reschedule {
-            let mut sockets = self.sockets.lock().await;
+            let mut sockets = self.sockets.lock().unwrap();
             if let Some(mut node) = sockets.peek_mut() {
                 if node.socket_id == socket_id {
                     node.timestamp = self.start_time;
@@ -101,19 +104,19 @@ impl UdtSndQueue {
         if !self
             .sockets
             .lock()
-            .await
+            .unwrap()
             .iter()
             .any(|n| n.socket_id == socket_id)
         {
-            self.insert(self.start_time, socket_id).await;
+            self.insert(self.start_time, socket_id);
         } else if reschedule {
-            self.remove(socket_id).await;
-            self.insert(self.start_time, socket_id).await;
+            self.remove(socket_id);
+            self.insert(self.start_time, socket_id);
         }
     }
 
-    pub async fn remove(&self, socket_id: SocketId) {
-        let mut sockets = self.sockets.lock().await;
+    pub fn remove(&self, socket_id: SocketId) {
+        let mut sockets = self.sockets.lock().unwrap();
         *sockets = sockets
             .iter()
             .filter(|n| n.socket_id != socket_id)

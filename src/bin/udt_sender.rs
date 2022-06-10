@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
-use tokio::io::ErrorKind;
 // use tokio::time::sleep;
+use tokio::io::{AsyncWriteExt, ErrorKind};
 use tokio_udt::UdtConnection;
 
 #[tokio::main]
 async fn main() {
-    let connection = UdtConnection::connect("127.0.0.1:9000".parse().unwrap())
+    let mut connection = UdtConnection::connect("127.0.0.1:9000".parse().unwrap())
         .await
         .unwrap();
 
@@ -22,20 +22,30 @@ async fn main() {
 
     loop {
         connection
-            .send(&buffer[..])
+            .write_all(&buffer)
             .await
             .map(|_| {
                 count += 1;
             })
-            .or_else(|err| match err.kind() {
-                ErrorKind::OutOfMemory => Ok(()),
-                _ => Err(err),
-            })
             .unwrap();
+
+        // connection
+        //     .send(&buffer[..])
+        //     .await
+        //     .map(|_| {
+        //         count += 1;
+        //     })
+        //     .or_else(|err| match err.kind() {
+        //         ErrorKind::OutOfMemory => {
+        //             println!("OOM");
+        //             Ok(())
+        //         }
+        //         _ => Err(err),
+        //     })
+        //     .unwrap();
 
         if last.elapsed() > Duration::new(1, 0) {
             last = Instant::now();
-
             println!("Sent {} messages", count);
         }
     }

@@ -57,7 +57,7 @@ impl RcvBuffer {
     pub fn has_data_to_read(&self) -> bool {
         let first = self.next_to_read;
         let last = self.next_to_ack;
-        if first < last {
+        if first <= last {
             return self.packets.range(first..last).next().is_some();
         } else {
             return self
@@ -70,6 +70,10 @@ impl RcvBuffer {
     }
 
     pub fn read_buffer(&mut self, buf: &mut [u8]) -> usize {
+        if self.next_to_read == self.next_to_ack {
+            return 0;
+        }
+
         let buf_len = buf.len();
         let packets = {
             if self.next_to_read <= self.next_to_ack {

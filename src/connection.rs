@@ -3,7 +3,7 @@ use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Result};
+use tokio::io::{AsyncRead, AsyncWrite, ErrorKind, ReadBuf, Result};
 
 pub struct UdtConnection {
     socket: SocketRef,
@@ -31,26 +31,12 @@ impl UdtConnection {
     }
 
     pub async fn send(&self, msg: &[u8]) -> Result<()> {
-        self.socket.send(msg).await?;
-        Ok(())
+        self.socket.send(msg)
     }
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize> {
         let nbytes = self.socket.recv(buf).await?;
         Ok(nbytes)
-    }
-
-    pub async fn recv_buf(&self, buf: &mut ReadBuf<'_>) -> Result<()> {
-        println!("Recv buf...");
-
-        let rcv_buf = buf.initialize_unfilled();
-        println!("Rcv buf size {}", rcv_buf.len());
-        let nbytes = self.socket.recv(rcv_buf).await?;
-        if nbytes > 0 {
-            buf.advance(nbytes);
-        }
-        println!("Recv buf done.");
-        Ok(())
     }
 }
 
@@ -72,5 +58,39 @@ impl AsyncRead for UdtConnection {
                 Poll::Pending
             }
         }
+    }
+}
+
+impl AsyncWrite for UdtConnection {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize>> {
+        let buf_len = buf.len();
+        match self.socket.send(buf) {
+            Ok(_) => Poll::Ready(Ok(buf_len)),
+            Err(err) => match err.kind() {
+                ErrorKind::OutOfMemory => {
+                    let waker = cx.waker().clone();
+                    let socket = self.socket.clone();
+                    tokio::spawn(async move {
+                        socket.ack_notify.notified().await;
+                        waker.wake();
+                    });
+                    Poll::Pending
+                }
+                _ => Poll::Ready(Err(err)),
+            },
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+        // TODO: Best effort shutdown
+        // match self.socket.close() {
+        //     Ok(_) => Poll::Ready(Ok(())),
+        //     Err(e) => Poll::Ready(Err(Error::new(ErrorKind::Other, e.err_msg))),
+        // }
+        Poll::Ready(Ok(()))
     }
 }
