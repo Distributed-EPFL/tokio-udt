@@ -60,7 +60,7 @@ pub struct UdtSocket {
     pub(crate) accept_notify: Notify,
     pub(crate) backlog_size: usize,
     pub(crate) multiplexer: Mutex<Weak<UdtMultiplexer>>,
-    pub configuration: TokioRwLock<UdtConfiguration>,
+    pub configuration: RwLock<UdtConfiguration>,
 
     rcv_buffer: Mutex<RcvBuffer>,
     snd_buffer: Mutex<SndBuffer>,
@@ -112,7 +112,7 @@ impl UdtSocket {
             connect_notify: Notify::new(),
             rcv_notify: Notify::new(),
             ack_notify: Notify::new(),
-            configuration: TokioRwLock::new(configuration),
+            configuration: RwLock::new(configuration),
         }
     }
 
@@ -132,7 +132,7 @@ impl UdtSocket {
         self
     }
 
-    pub async fn open(&self) {
+    pub fn open(&self) {
         *self.status.lock().unwrap() = UdtStatus::Opened;
     }
 
@@ -158,7 +158,7 @@ impl UdtSocket {
         mut hs: HandShakeInfo,
     ) -> Result<SocketRef> {
         {
-            let mut configuration = self.configuration.write().await;
+            let mut configuration = self.configuration.write().unwrap();
             if hs.max_packet_size > configuration.mss {
                 hs.max_packet_size = configuration.mss;
             } else {
@@ -185,7 +185,7 @@ impl UdtSocket {
         );
 
         if let Some(mux) = self.multiplexer() {
-            mux.rcv_queue.push_back(self.socket_id).await;
+            mux.rcv_queue.push_back(self.socket_id);
             mux.send_to(&peer, packet.into()).await?;
         }
 
@@ -359,8 +359,8 @@ impl UdtSocket {
         }
 
         let dest_socket_id = hs.socket_id;
-        let configuration = self.configuration.read().await;
-        if hs.udt_version != configuration.udt_version() || hs.socket_type != self.socket_type {
+        let udt_version = self.configuration.read().unwrap().udt_version();
+        if hs.udt_version != udt_version || hs.socket_type != self.socket_type {
             // Reject request
             let mut hs_response = hs.clone();
             hs_response.connection_type = 1002; // Error codes defined in C++ implementation
@@ -417,7 +417,7 @@ impl UdtSocket {
                     self.send_packet(hs_packet.into()).await?;
                 } else {
                     // post connect
-                    let mut configuration = self.configuration.write().await;
+                    let mut configuration = self.configuration.write().unwrap();
                     configuration.mss = hs.max_packet_size;
                     configuration.flight_flag_size = hs.max_window_size;
                     let mut state = self.state();
@@ -616,11 +616,10 @@ impl UdtSocket {
             // seq number is too late
             return Ok(());
         }
-        if self.rcv_buffer().get_available_buf_size() < offset as u32 {
-            return Err(Error::new(
-                ErrorKind::OutOfMemory,
-                "not enough space in rcv buffer",
-            ));
+        let available_buf_size = self.rcv_buffer().get_available_buf_size();
+        if available_buf_size < offset as u32 {
+            eprintln!("not enough space in rcv buffer");
+            return Ok(());
         }
 
         let payload_len = packet.payload_len();
@@ -634,7 +633,7 @@ impl UdtSocket {
                     .rcv_loss_list
                     .insert(curr_rcv_seq_number + 1, seq_number - 1);
 
-                // send NAK immedialtely
+                // send NAK immediately
                 let loss_list = {
                     if state.curr_rcv_seq_number + 1 == seq_number - 1 {
                         vec![(seq_number - 1).number()]
@@ -651,7 +650,7 @@ impl UdtSocket {
             // TODO increment NAK stats
         }
 
-        if payload_len < self.get_max_payload_size().await {
+        if payload_len < self.get_max_payload_size() {
             self.state().next_ack_time = Instant::now();
         }
 
@@ -666,8 +665,8 @@ impl UdtSocket {
         Ok(())
     }
 
-    pub async fn get_max_payload_size(&self) -> u32 {
-        let configuration = self.configuration.read().await;
+    pub fn get_max_payload_size(&self) -> u32 {
+        let configuration = self.configuration.read().unwrap();
         match self.peer_addr().map(|a| a.ip()) {
             Some(IpAddr::V6(_)) => configuration.mss - 40 - UDT_HEADER_SIZE,
             _ => configuration.mss - 28 - UDT_HEADER_SIZE,
@@ -712,19 +711,23 @@ impl UdtSocket {
         {
             let mut state = self.state();
             let to_ack: i32 = seq_number - state.last_sent_ack;
-            if to_ack > 0 {
-                self.rcv_buffer().ack_data(seq_number);
-                state.last_sent_ack = seq_number;
-                self.rcv_notify.notify_waiters();
-            } else if to_ack == 0 {
-                let last_sent_ack_elapsed = state.last_sent_ack_time.elapsed();
-                drop(state);
-                let flow = self.flow.read().unwrap();
-                if last_sent_ack_elapsed < (flow.rtt + 4 * flow.rtt_var) {
+            match to_ack.cmp(&0) {
+                Ordering::Greater => {
+                    self.rcv_buffer().ack_data(seq_number);
+                    state.last_sent_ack = seq_number;
+                    self.rcv_notify.notify_waiters();
+                }
+                Ordering::Equal => {
+                    let last_sent_ack_elapsed = state.last_sent_ack_time.elapsed();
+                    drop(state);
+                    let flow = self.flow.read().unwrap();
+                    if last_sent_ack_elapsed < (flow.rtt + 4 * flow.rtt_var) {
+                        return Ok(());
+                    }
+                }
+                _ => {
                     return Ok(());
                 }
-            } else {
-                return Ok(());
             }
         }
 
@@ -827,7 +830,6 @@ impl UdtSocket {
                     // Connection is broken
                     *self.status.lock().unwrap() = UdtStatus::Broken;
                     self.update_snd_queue(true);
-                    println!("EXP OK");
                     return;
                 }
             }
@@ -996,7 +998,7 @@ impl UdtSocket {
             ));
         }
 
-        self.open().await;
+        self.open();
         {
             let mut udt = Udt::get().write().await;
             udt.update_mux(self, None).await?;
@@ -1007,23 +1009,24 @@ impl UdtSocket {
 
         // TODO: use rendezvous queue?
 
-        let configuration = self.configuration.read().await;
-
-        let hs = HandShakeInfo {
-            udt_version: configuration.udt_version(),
-            initial_seq_number: self.initial_seq_number,
-            max_packet_size: configuration.mss,
-            max_window_size: std::cmp::min(
-                self.flow.read().unwrap().flow_window_size,
-                self.rcv_buffer().get_available_buf_size(),
-            ),
-            connection_type: 1,
-            socket_type: self.socket_type,
-            socket_id: self.socket_id,
-            ip_address: addr.ip(),
-            syn_cookie: 0,
+        let hs_packet = {
+            let configuration = self.configuration.read().unwrap();
+            let hs = HandShakeInfo {
+                udt_version: configuration.udt_version(),
+                initial_seq_number: self.initial_seq_number,
+                max_packet_size: configuration.mss,
+                max_window_size: std::cmp::min(
+                    self.flow.read().unwrap().flow_window_size,
+                    self.rcv_buffer().get_available_buf_size(),
+                ),
+                connection_type: 1,
+                socket_type: self.socket_type,
+                socket_id: self.socket_id,
+                ip_address: addr.ip(),
+                syn_cookie: 0,
+            };
+            UdtControlPacket::new_handshake(hs, 0)
         };
-        let hs_packet = UdtControlPacket::new_handshake(hs, 0);
         self.send_to(&addr, hs_packet.into()).await?;
 
         Ok(())

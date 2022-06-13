@@ -43,7 +43,7 @@ impl Udt {
         socket_id
     }
 
-    pub(crate) async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
+    pub(crate) fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
         if let Some(socket) = self.sockets.get(&socket_id) {
             if socket.status() != UdtStatus::Closed {
                 return Some(socket.clone());
@@ -133,7 +133,7 @@ impl Udt {
                     .with_peer(peer, hs.socket_id)
                     .await
                     .with_listen_socket(listener_socket.socket_id, multiplexer);
-            new_socket.open().await;
+            new_socket.open();
             new_socket
         };
 
@@ -156,7 +156,6 @@ impl Udt {
     pub async fn bind(&mut self, socket_id: SocketId, addr: SocketAddr) -> Result<()> {
         let socket = self
             .get_socket(socket_id)
-            .await
             .ok_or_else(|| Error::new(ErrorKind::Other, "unknown socket id"))?;
 
         if socket.status() != UdtStatus::Init {
@@ -164,7 +163,7 @@ impl Udt {
         }
 
         self.update_mux(&socket, Some(addr)).await?;
-        socket.open().await;
+        socket.open();
         Ok(())
     }
 
@@ -177,7 +176,7 @@ impl Udt {
             if let Some(bind_addr) = bind_addr {
                 let port = bind_addr.port();
                 for mux in self.multiplexers.values() {
-                    let socket_mss = socket.configuration.read().await.mss;
+                    let socket_mss = socket.configuration.read().unwrap().mss;
                     if mux.reusable && mux.port == port && mux.mss == socket_mss {
                         socket.set_multiplexer(mux);
                         return Ok(());
@@ -188,7 +187,7 @@ impl Udt {
 
         // A new multiplexer is needed
         let mux = {
-            let configuration = socket.configuration.read().await;
+            let configuration = socket.configuration.read().unwrap().clone();
             let (mux_id, mux) = if let Some(bind_addr) = bind_addr {
                 UdtMultiplexer::bind(socket.socket_id, bind_addr, &configuration).await?
             } else {

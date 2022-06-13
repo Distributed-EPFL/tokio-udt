@@ -31,7 +31,7 @@ impl SndBufferBlock {
         start_time: Instant,
     ) -> UdtDataPacket {
         UdtDataPacket {
-            data: self.data.clone(),
+            data: self.data.to_vec(),
             header: UdtDataPacketHeader {
                 msg_number: self.msg_number,
                 dest_socket_id,

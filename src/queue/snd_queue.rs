@@ -17,7 +17,7 @@ struct SendQueueNode {
 
 impl SendQueueNode {
     pub async fn socket(&self) -> Option<SocketRef> {
-        Udt::get().read().await.get_socket(self.socket_id).await
+        Udt::get().read().await.get_socket(self.socket_id)
     }
 }
 
@@ -57,7 +57,6 @@ impl UdtSndQueue {
                 sockets.peek().map(|n| n.timestamp)
             };
             if let Some(timestamp) = next_timestamp {
-
                 tokio::select! {
                    _ = Delay::new(timestamp.into_std())? => {}
                    _ = self.notify.notified() => {}

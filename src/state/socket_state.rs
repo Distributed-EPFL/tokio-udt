@@ -45,7 +45,7 @@ impl SocketState {
             curr_rcv_seq_number: isn - 1,
 
             next_ack_time: now + SYN_INTERVAL,
-            interpacket_interval: Duration::from_micros(100),
+            interpacket_interval: Duration::from_micros(10),
             ack_packet_counter: 0,
             light_ack_counter: 0,
 

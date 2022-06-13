@@ -43,6 +43,7 @@ impl UdtFlow {
         if self.arrival_window.len() > ARRIVAL_WINDOW_SIZE {
             self.arrival_window.pop_front();
         }
+        self.last_arrival_time = now;
     }
 
     pub fn on_probe1_arrival(&mut self) {

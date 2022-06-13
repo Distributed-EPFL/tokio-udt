@@ -6,7 +6,6 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
 
@@ -15,7 +14,7 @@ const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(100);
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
-    sockets: TokioMutex<VecDeque<(Instant, SocketId)>>,
+    sockets: Mutex<VecDeque<(Instant, SocketId)>>,
     payload_size: u32,
     channel: Arc<UdpSocket>,
     multiplexer: Mutex<Weak<UdtMultiplexer>>,
@@ -24,23 +23,26 @@ pub(crate) struct UdtRcvQueue {
 impl UdtRcvQueue {
     pub fn new(channel: Arc<UdpSocket>, payload_size: u32) -> Self {
         Self {
-            sockets: TokioMutex::new(VecDeque::new()),
+            sockets: Mutex::new(VecDeque::new()),
             payload_size,
             channel,
             multiplexer: Mutex::new(Weak::new()),
         }
     }
 
-    pub async fn push_back(&self, socket_id: SocketId) {
+    pub fn push_back(&self, socket_id: SocketId) {
         self.sockets
             .lock()
-            .await
+            .unwrap()
             .push_back((Instant::now(), socket_id));
     }
 
-    pub async fn update(&self, socket_id: SocketId) {
-        self.sockets.lock().await.retain(|(_, id)| socket_id != *id);
-        self.push_back(socket_id).await;
+    pub fn update(&self, socket_id: SocketId) {
+        self.sockets
+            .lock()
+            .unwrap()
+            .retain(|(_, id)| socket_id != *id);
+        self.push_back(socket_id);
     }
 
     pub fn set_multiplexer(&self, mux: &Arc<UdtMultiplexer>) {
@@ -48,7 +50,6 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
-        let mut last = Instant::now();
         let mut buf = vec![0_u8; self.payload_size as usize];
         loop {
             if let Some((size, addr)) = tokio::select! {
@@ -81,14 +82,14 @@ impl UdtRcvQueue {
                     //     continue;
                     // }
 
-                    if let Some(socket) = Udt::get().read().await.get_socket(socket_id).await {
+                    if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
                         if socket.peer_addr() == Some(addr)
                             && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
                                 .contains(&socket.status())
                         {
                             socket.process_packet(packet).await?;
                             socket.check_timers().await;
-                            self.update(socket_id).await;
+                            self.update(socket_id);
                         } else {
                             eprintln!("Ignoring packet {:?}", packet);
                         }
@@ -99,22 +100,20 @@ impl UdtRcvQueue {
                 }
             }
 
-            for (_, socket_id) in self
+            let to_check: Vec<_> = self
                 .sockets
                 .lock()
-                .await
+                .unwrap()
                 .iter()
                 .take_while(|(ts, _)| ts.elapsed() > TIMERS_CHECK_INTERVAL)
-            {
-                if let Some(socket) = Udt::get().read().await.get_socket(*socket_id).await {
+                .map(|(_, socket_id)| *socket_id)
+                .collect();
+
+            for socket_id in to_check {
+                if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
                     socket.check_timers().await;
                 }
             }
-
-            // if last.elapsed() > Duration::new(1, 0) {
-            //     last = Instant::now();
-            //     println!("PING RCV");
-            // }
         }
     }
 }

@@ -2,6 +2,7 @@ use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
 use crate::queue::{UdtRcvQueue, UdtSndQueue};
 use crate::udt::SocketRef;
+use socket2::{Domain, Socket, Type};
 use std::io::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,11 +25,37 @@ pub struct UdtMultiplexer {
 }
 
 impl UdtMultiplexer {
+    async fn new_udp_socket(
+        config: &UdtConfiguration,
+        bind_addr: Option<SocketAddr>,
+    ) -> Result<UdpSocket> {
+        let domain = if bind_addr.map(|addr| addr.ip().is_ipv6()).unwrap_or(false) {
+            Domain::IPV6
+        } else {
+            Domain::IPV4
+        };
+        tokio::task::spawn_blocking({
+            let config = config.clone();
+            move || {
+                let socket = Socket::new(domain, Type::DGRAM, None)?;
+                socket.set_recv_buffer_size(config.udp_rcv_buf_size)?;
+                socket.set_send_buffer_size(config.udp_snd_buf_size)?;
+                socket.set_nonblocking(true)?;
+                if let Some(addr) = bind_addr {
+                    socket.bind(&addr.into())?;
+                }
+                UdpSocket::from_std(socket.into())
+            }
+        })
+        .await?
+    }
+
     pub(crate) async fn new(
         id: MultiplexerId,
         config: &UdtConfiguration,
     ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
-        let channel = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+        let udp_socket = Self::new_udp_socket(config, None).await?;
+        let channel = Arc::new(udp_socket);
         let port = channel.local_addr()?.port();
         let mux = Self {
             id,
@@ -52,9 +79,8 @@ impl UdtMultiplexer {
         config: &UdtConfiguration,
     ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
         let port = bind_addr.port();
-        let channel = Arc::new(UdpSocket::bind(bind_addr).await?);
-        // TODO: set UDP sndBufSize and rcvBufSize ?
-
+        let udp_socket = Self::new_udp_socket(config, Some(bind_addr)).await?;
+        let channel = Arc::new(udp_socket);
         let mux = Self {
             id,
             port,

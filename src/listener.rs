@@ -15,7 +15,7 @@ impl UdtListener {
             udt.new_socket(SocketType::Stream, backlog)?.clone()
         };
 
-        if socket.configuration.read().await.rendezvous {
+        if socket.configuration.read().unwrap().rendezvous {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "listen is not supported in rendezvous connection setup",
@@ -45,7 +45,7 @@ impl UdtListener {
 
     pub async fn accept(&self) -> Result<(SocketAddr, UdtConnection)> {
         {
-            if self.socket.configuration.read().await.rendezvous {
+            if self.socket.configuration.read().unwrap().rendezvous {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "no 'accept' in rendezvous connection setup",
@@ -73,7 +73,7 @@ impl UdtListener {
         };
 
         let udt = Udt::get().read().await;
-        let accepted_socket = udt.get_socket(accepted_socket_id).await.ok_or_else(|| {
+        let accepted_socket = udt.get_socket(accepted_socket_id).ok_or_else(|| {
             Error::new(
                 ErrorKind::Other,
                 "invalid socket id when accepting connection",

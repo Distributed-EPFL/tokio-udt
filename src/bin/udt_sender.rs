@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
-// use tokio::time::sleep;
-use tokio::io::{AsyncWriteExt, ErrorKind};
+use tokio::io::AsyncWriteExt;
 use tokio_udt::UdtConnection;
 
 #[tokio::main]
@@ -12,7 +11,7 @@ async fn main() {
     println!("Connected!");
 
     let buffer: Vec<u8> = std::iter::repeat(b"Hello World!")
-        .take(10000)
+        .take(100000)
         .flat_map(|b| *b)
         .collect();
     println!("Message length: {}", buffer.len());
@@ -28,21 +27,6 @@ async fn main() {
                 count += 1;
             })
             .unwrap();
-
-        // connection
-        //     .send(&buffer[..])
-        //     .await
-        //     .map(|_| {
-        //         count += 1;
-        //     })
-        //     .or_else(|err| match err.kind() {
-        //         ErrorKind::OutOfMemory => {
-        //             println!("OOM");
-        //             Ok(())
-        //         }
-        //         _ => Err(err),
-        //     })
-        //     .unwrap();
 
         if last.elapsed() > Duration::new(1, 0) {
             last = Instant::now();

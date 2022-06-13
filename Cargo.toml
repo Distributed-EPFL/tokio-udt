@@ -10,5 +10,5 @@ rand = "*"
 tokio = { version = "1.*", features = [ "macros", "net", "io-util", "sync", "time", "rt-multi-thread" ] }
 sha2 = "*"
 once_cell = "*"
-# console-subscriber = "*"
 tokio-timerfd = "*"
+socket2 = "*"
