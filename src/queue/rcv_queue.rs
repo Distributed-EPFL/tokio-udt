@@ -1,8 +1,8 @@
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtStatus};
-use crate::udt::Udt;
-use std::collections::VecDeque;
+use crate::udt::{SocketRef, Udt};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
@@ -18,6 +18,7 @@ pub(crate) struct UdtRcvQueue {
     payload_size: u32,
     channel: Arc<UdpSocket>,
     multiplexer: Mutex<Weak<UdtMultiplexer>>,
+    socket_refs: Mutex<BTreeMap<SocketId, SocketRef>>,
 }
 
 impl UdtRcvQueue {
@@ -27,6 +28,7 @@ impl UdtRcvQueue {
             payload_size,
             channel,
             multiplexer: Mutex::new(Weak::new()),
+            socket_refs: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -49,12 +51,34 @@ impl UdtRcvQueue {
         *self.multiplexer.lock().unwrap() = Arc::downgrade(mux);
     }
 
+    async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
+        let known_socket = self.socket_refs.lock().unwrap().get(&socket_id).cloned();
+        if let Some(socket) = known_socket {
+            Some(socket)
+        } else if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
+            self.socket_refs
+                .lock()
+                .unwrap()
+                .insert(socket_id, socket.clone());
+            Some(socket)
+        } else {
+            None
+        }
+    }
+
     pub(crate) async fn worker(&self) -> Result<()> {
         let mut buf = vec![0_u8; self.payload_size as usize];
         loop {
-            if let Some((size, addr)) = tokio::select! {
-                r = self.channel.recv_from(&mut buf) => Some(r?),
-                _ = sleep(UDP_RCV_TIMEOUT) => None,
+            if let Some((size, addr)) = {
+                let res = self.channel.try_recv_from(&mut buf).ok();
+                if res.is_some() {
+                    res
+                } else {
+                    tokio::select! {
+                        r = self.channel.recv_from(&mut buf) => Some(r?),
+                        _ = sleep(UDP_RCV_TIMEOUT) => None,
+                    }
+                }
             } {
                 let packet = UdtPacket::deserialize(&buf[..size])?;
                 let socket_id = packet.get_dest_socket_id();
@@ -82,7 +106,7 @@ impl UdtRcvQueue {
                     //     continue;
                     // }
 
-                    if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
+                    if let Some(socket) = self.get_socket(socket_id).await {
                         if socket.peer_addr() == Some(addr)
                             && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
                                 .contains(&socket.status())

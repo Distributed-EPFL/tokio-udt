@@ -1,8 +1,7 @@
 use crate::data_packet::UdtDataPacket;
 use crate::seq_number::{MsgNumber, SeqNumber};
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use tokio::io::Result;
+use tokio::io::ReadBuf;
 
 #[derive(Debug)]
 pub(crate) struct RcvBuffer {
@@ -26,21 +25,9 @@ impl RcvBuffer {
         self.max_size - self.packets.len() as u32
     }
 
-    pub fn insert(&mut self, packet: UdtDataPacket) -> Result<()> {
+    pub fn insert(&mut self, packet: UdtDataPacket) {
         let seq_number = packet.header.seq_number;
-        match self.packets.entry(seq_number) {
-            Entry::Occupied(_) => {
-                // eprintln!(
-                //     "a packet with the same seq number {} is present in buffer",
-                //     seq_number.number()
-                // );
-                Ok(())
-            }
-            Entry::Vacant(e) => {
-                e.insert(packet);
-                Ok(())
-            }
-        }
+        self.packets.entry(seq_number).or_insert(packet);
     }
 
     pub fn drop_msg(&mut self, msg: MsgNumber) {
@@ -69,12 +56,11 @@ impl RcvBuffer {
         }
     }
 
-    pub fn read_buffer(&mut self, buf: &mut [u8]) -> usize {
+    pub fn read_buffer(&mut self, buf: &mut ReadBuf<'_>) -> usize {
         if self.next_to_read == self.next_to_ack {
             return 0;
         }
 
-        let buf_len = buf.len();
         let packets = {
             if self.next_to_read <= self.next_to_ack {
                 self.packets
@@ -93,10 +79,10 @@ impl RcvBuffer {
         let mut to_remove = vec![];
         for (key, packet) in packets {
             let packet_len = packet.data.len();
-            if (buf_len - written) < packet_len {
+            if buf.remaining() < packet_len {
                 break;
             }
-            buf[written..written + packet_len].copy_from_slice(&packet.data);
+            buf.put_slice(&packet.data);
             written += packet_len;
             to_remove.push(*key);
             self.next_to_read = *key + 1;

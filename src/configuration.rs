@@ -31,7 +31,7 @@ impl Default for UdtConfiguration {
             mss: DEFAULT_MSS,
             flight_flag_size: 25600,
             snd_buf_size: DEFAULT_UDT_BUF_SIZE,
-            rcv_buf_size: DEFAULT_UDT_BUF_SIZE,
+            rcv_buf_size: DEFAULT_UDT_BUF_SIZE * 2,
             udp_snd_buf_size: 65536,
             udp_rcv_buf_size: (DEFAULT_MSS * DEFAULT_UDT_BUF_SIZE) as usize,
             linger_timeout: Some(180),

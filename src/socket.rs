@@ -623,7 +623,7 @@ impl UdtSocket {
         }
 
         let payload_len = packet.payload_len();
-        self.rcv_buffer().insert(packet)?;
+        self.rcv_buffer().insert(packet);
         if (seq_number - self.state().curr_rcv_seq_number) > 1 {
             // some packets have been lost in between
             let nak_packet = {
@@ -949,7 +949,8 @@ impl UdtSocket {
             ));
         }
 
-        let written = self.rcv_buffer().read_buffer(buf);
+        let mut buf = ReadBuf::new(buf);
+        let written = self.rcv_buffer().read_buffer(&mut buf);
 
         // TODO: handle UDT timeout
         Ok(written)
@@ -981,12 +982,10 @@ impl UdtSocket {
             return Poll::Pending;
         }
 
-        let rcv_buf = buf.initialize_unfilled();
-        if rcv_buf.is_empty() {
+        if buf.remaining() == 0 {
             return Poll::Ready(Ok(0));
         }
-        let written = self.rcv_buffer().read_buffer(rcv_buf);
-        buf.advance(written);
+        let written = self.rcv_buffer().read_buffer(buf);
         Poll::Ready(Ok(written))
     }
 
