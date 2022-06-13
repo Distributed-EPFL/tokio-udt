@@ -17,4 +17,3 @@ mod udt;
 
 pub use connection::UdtConnection;
 pub use listener::UdtListener;
-pub use udt::Udt;

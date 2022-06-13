@@ -13,10 +13,10 @@ use tokio::sync::RwLock;
 
 pub(crate) type SocketRef = Arc<UdtSocket>;
 
-pub static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
+pub(crate) static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
 
 #[derive(Default, Debug)]
-pub struct Udt {
+pub(crate) struct Udt {
     sockets: BTreeMap<SocketId, SocketRef>,
     // closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Arc<UdtMultiplexer>>,

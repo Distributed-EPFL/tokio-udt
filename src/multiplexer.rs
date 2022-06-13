@@ -101,11 +101,11 @@ impl UdtMultiplexer {
         self.channel.send_to(&packet.serialize(), addr).await
     }
 
-    pub fn get_local_addr(&self) -> SocketAddr {
-        self.channel
-            .local_addr()
-            .expect("failed to retrieve udp local addr")
-    }
+    // pub fn get_local_addr(&self) -> SocketAddr {
+    //     self.channel
+    //         .local_addr()
+    //         .expect("failed to retrieve udp local addr")
+    // }
 
     pub fn run(mux: Arc<Self>) {
         let mux2 = mux.clone();

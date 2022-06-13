@@ -35,17 +35,17 @@ pub(crate) struct SocketState {
 }
 
 impl SocketState {
-    pub fn new(isn: SeqNumber, configuration: &UdtConfiguration) -> Self {
+    pub fn new(isn: SeqNumber, _configuration: &UdtConfiguration) -> Self {
         let now = Instant::now();
 
         Self {
             last_rsp_time: now,
             last_ack_seq_number: AckSeqNumber::zero(),
-            rcv_loss_list: LossList::new(configuration.flight_flag_size),
+            rcv_loss_list: LossList::new(),
             curr_rcv_seq_number: isn - 1,
 
             next_ack_time: now + SYN_INTERVAL,
-            interpacket_interval: Duration::from_micros(10),
+            interpacket_interval: Duration::from_micros(1),
             ack_packet_counter: 0,
             light_ack_counter: 0,
 
@@ -59,7 +59,7 @@ impl SocketState {
             last_ack2_sent_back: isn.number().into(),
             last_ack2_time: now,
             last_data_ack_processed: isn,
-            snd_loss_list: LossList::new(configuration.flight_flag_size * 2),
+            snd_loss_list: LossList::new(),
             ack_window: AckWindow::new(1024),
         }
     }

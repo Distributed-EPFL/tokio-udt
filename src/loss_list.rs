@@ -4,14 +4,12 @@ use std::collections::BTreeMap;
 #[derive(Debug)]
 pub(crate) struct LossList {
     sequences: BTreeMap<SeqNumber, (SeqNumber, SeqNumber)>,
-    max_size: u32,
 }
 
 impl LossList {
-    pub fn new(max_size: u32) -> Self {
+    pub fn new() -> Self {
         Self {
             sequences: BTreeMap::new(),
-            max_size,
         }
     }
 
@@ -162,7 +160,7 @@ impl LossList {
 
 #[test]
 fn test_insert_sequences() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(5.into(), 10.into());
     loss_list.insert(1.into(), 2.into());
     assert_eq!(loss_list.sequences.len(), 2);
@@ -184,7 +182,7 @@ fn test_insert_sequences() {
 
 #[test]
 fn test_insert_overlapping_sequence() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(1.into(), 10.into());
     loss_list.insert(5.into(), 20.into());
     assert_eq!(loss_list.sequences.len(), 1);
@@ -194,7 +192,7 @@ fn test_insert_overlapping_sequence() {
 
 #[test]
 fn test_insert_with_multiple_overlapping_sequences() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(6.into(), 10.into());
     loss_list.insert(12.into(), 25.into());
     loss_list.insert(1.into(), 22.into());
@@ -205,7 +203,7 @@ fn test_insert_with_multiple_overlapping_sequences() {
 
 #[test]
 fn test_insert_with_bigger_existing_sequence() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(10.into(), 30.into());
     loss_list.insert(10.into(), 20.into());
     assert_eq!(loss_list.sequences.len(), 1);
@@ -215,7 +213,7 @@ fn test_insert_with_bigger_existing_sequence() {
 
 #[test]
 fn test_remove_seq_inside_sequence() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(1.into(), 10.into());
     loss_list.remove(5.into());
 
@@ -232,7 +230,7 @@ fn test_remove_seq_inside_sequence() {
 
 #[test]
 fn test_remove_first_item() {
-    let mut loss_list = crate::loss_list::LossList::new(1000);
+    let mut loss_list = crate::loss_list::LossList::new();
     loss_list.insert(1.into(), 10.into());
     loss_list.remove(1.into());
 

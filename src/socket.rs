@@ -205,12 +205,12 @@ impl UdtSocket {
     //     self.self_ip = Some(ip);
     // }
 
-    pub async fn self_addr(&self) -> Option<SocketAddr> {
-        if let Some(mux) = self.multiplexer.lock().unwrap().upgrade() {
-            return Some(mux.get_local_addr());
-        }
-        None
-    }
+    // pub async fn self_addr(&self) -> Option<SocketAddr> {
+    //     if let Some(mux) = self.multiplexer.lock().unwrap().upgrade() {
+    //         return Some(mux.get_local_addr());
+    //     }
+    //     None
+    // }
 
     pub(crate) async fn next_data_packet(&self) -> Result<Option<(UdtDataPacket, Instant)>> {
         if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status()) {

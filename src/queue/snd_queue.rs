@@ -64,25 +64,40 @@ impl UdtSndQueue {
     pub async fn worker(&self) -> Result<()> {
         loop {
             let next_node = {
-                let sockets = self.queue.lock().unwrap();
-                sockets.peek().cloned()
+                let mut sockets = self.queue.lock().unwrap();
+                let first_node = sockets.peek();
+                match first_node {
+                    Some(node) => {
+                        if node.timestamp <= Instant::now() {
+                            Ok(sockets.pop().unwrap())
+                        }
+                        else {
+                            Err(Some(node.timestamp))
+                        }
+                    },
+                    None => {
+                        Err(None)
+                    }
+                }
             };
-            if let Some(node) = next_node {
-                if node.timestamp > Instant::now() {
+            match next_node {
+                Ok(node) => {
+                    if let Some(socket) = self.get_socket(node.socket_id).await {
+                        if let Some((packet, ts)) = socket.next_data_packet().await? {
+                            self.insert(ts, node.socket_id);
+                            socket.send_packet(packet.into()).await?;
+                        }
+                    }
+                },
+                Err(Some(ts)) => {
                     tokio::select! {
-                    _ = Delay::new(node.timestamp.into_std())? => {}
-                    _ = self.notify.notified() => {}
-                    }
-                    continue;
-                }
-                if let Some(socket) = self.get_socket(node.socket_id).await {
-                    if let Some((packet, ts)) = socket.next_data_packet().await? {
-                        self.insert(ts, node.socket_id);
-                        socket.send_packet(packet.into()).await?;
+                        _ = Delay::new(ts.into_std())? => {}
+                        _ = self.notify.notified() => {}
                     }
                 }
-            } else {
-                self.notify.notified().await;
+                _ => {
+                    self.notify.notified().await;
+                }
             }
         }
     }
