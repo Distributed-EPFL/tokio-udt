@@ -70,25 +70,22 @@ impl UdtSndQueue {
                     Some(node) => {
                         if node.timestamp <= Instant::now() {
                             Ok(sockets.pop().unwrap())
-                        }
-                        else {
+                        } else {
                             Err(Some(node.timestamp))
                         }
-                    },
-                    None => {
-                        Err(None)
                     }
+                    None => Err(None),
                 }
             };
             match next_node {
                 Ok(node) => {
                     if let Some(socket) = self.get_socket(node.socket_id).await {
-                        if let Some((packet, ts)) = socket.next_data_packet().await? {
+                        if let Some((packets, ts)) = socket.next_data_packets().await? {
                             self.insert(ts, node.socket_id);
-                            socket.send_packet(packet.into()).await?;
+                            socket.send_data_packets(packets).await?;
                         }
                     }
-                },
+                }
                 Err(Some(ts)) => {
                     tokio::select! {
                         _ = Delay::new(ts.into_std())? => {}

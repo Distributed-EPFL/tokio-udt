@@ -1,16 +1,17 @@
 use crate::seq_number::{MsgNumber, SeqNumber};
+use bytes::Bytes;
 use tokio::io::{Error, ErrorKind, Result};
 
 #[derive(Debug)]
 pub(crate) struct UdtDataPacket {
     pub header: UdtDataPacketHeader,
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl UdtDataPacket {
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
         let header = UdtDataPacketHeader::deserialize(&raw[..16])?;
-        let data = raw[16..].into();
+        let data = Bytes::copy_from_slice(&raw[16..]);
         Ok(Self { header, data })
     }
 
@@ -19,7 +20,8 @@ impl UdtDataPacket {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = self.header.serialize();
+        let mut buffer = Vec::with_capacity(1600);
+        buffer.extend_from_slice(&self.header.serialize());
         buffer.extend_from_slice(&self.data);
         buffer
     }

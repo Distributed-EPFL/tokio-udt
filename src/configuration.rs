@@ -1,5 +1,6 @@
 const DEFAULT_MSS: u32 = 1500;
 const DEFAULT_UDT_BUF_SIZE: u32 = 8192;
+const DEFAULT_UDP_BUF_SIZE: usize = 8_000_000;
 const UDT_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
@@ -32,8 +33,8 @@ impl Default for UdtConfiguration {
             flight_flag_size: 25600,
             snd_buf_size: DEFAULT_UDT_BUF_SIZE,
             rcv_buf_size: DEFAULT_UDT_BUF_SIZE * 2,
-            udp_snd_buf_size: 65536,
-            udp_rcv_buf_size: (DEFAULT_MSS * DEFAULT_UDT_BUF_SIZE) as usize,
+            udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
+            udp_rcv_buf_size: DEFAULT_UDP_BUF_SIZE,
             linger_timeout: Some(180),
             reuse_addr: true,
             rendezvous: false,

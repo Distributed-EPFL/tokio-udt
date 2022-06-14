@@ -59,7 +59,7 @@ pub struct UdtSocket {
     pub(crate) queued_sockets: TokioRwLock<BTreeSet<SocketId>>,
     pub(crate) accept_notify: Notify,
     pub(crate) backlog_size: usize,
-    pub(crate) multiplexer: Mutex<Weak<UdtMultiplexer>>,
+    pub(crate) multiplexer: RwLock<Weak<UdtMultiplexer>>,
     pub configuration: RwLock<UdtConfiguration>,
 
     rcv_buffer: Mutex<RcvBuffer>,
@@ -95,7 +95,7 @@ impl UdtSocket {
             queued_sockets: TokioRwLock::new(BTreeSet::new()),
             accept_notify: Notify::new(),
             backlog_size: 0,
-            multiplexer: Mutex::new(Weak::new()),
+            multiplexer: RwLock::new(Weak::new()),
             snd_buffer: Mutex::new(SndBuffer::new(
                 configuration.snd_buf_size,
                 configuration.mss,
@@ -128,7 +128,7 @@ impl UdtSocket {
         mux: Arc<UdtMultiplexer>,
     ) -> Self {
         self.listen_socket = Some(listen_socket_id);
-        *self.multiplexer.lock().unwrap() = Arc::downgrade(&mux);
+        *self.multiplexer.write().unwrap() = Arc::downgrade(&mux);
         self
     }
 
@@ -194,11 +194,11 @@ impl UdtSocket {
     }
 
     pub fn set_multiplexer(&self, mux: &Arc<UdtMultiplexer>) {
-        *self.multiplexer.lock().unwrap() = Arc::downgrade(mux);
+        *self.multiplexer.write().unwrap() = Arc::downgrade(mux);
     }
 
     pub(crate) fn multiplexer(&self) -> Option<Arc<UdtMultiplexer>> {
-        self.multiplexer.lock().unwrap().upgrade()
+        self.multiplexer.read().unwrap().upgrade()
     }
 
     // pub fn set_self_ip(&mut self, ip: IpAddr) {
@@ -212,7 +212,7 @@ impl UdtSocket {
     //     None
     // }
 
-    pub(crate) async fn next_data_packet(&self) -> Result<Option<(UdtDataPacket, Instant)>> {
+    pub(crate) async fn next_data_packets(&self) -> Result<Option<(Vec<UdtDataPacket>, Instant)>> {
         if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status()) {
             return Err(Error::new(
                 ErrorKind::BrokenPipe,
@@ -231,12 +231,11 @@ impl UdtSocket {
                 .map(|seq| (seq, seq - last_data_ack_processed))
         };
 
-        let packet = match to_resend {
+        let packets = match to_resend {
             Some((seq, offset)) => {
                 // Loss retransmission has priority
                 if offset < 0 {
                     eprintln!("unexpected offset in sender loss list");
-                    dbg!(seq, offset);
                     return Ok(None);
                 }
                 let to_send = self.snd_buffer.lock().unwrap().read_data(
@@ -267,7 +266,7 @@ impl UdtSocket {
                         }
                         return Ok(None);
                     }
-                    Ok(packet) => packet,
+                    Ok(packet) => vec![packet],
                 }
             }
             None => {
@@ -277,30 +276,35 @@ impl UdtSocket {
                 if (state.curr_snd_seq_number - state.last_ack_received) > window_size as i32 {
                     return Ok(None);
                 }
-                match self.snd_buffer.lock().unwrap().fetch(
+                match self.snd_buffer.lock().unwrap().fetch_batch(
                     state.curr_snd_seq_number + 1,
                     self.peer_socket_id().unwrap(),
                     self.start_time,
                 ) {
-                    Some(packet) => {
-                        state.curr_snd_seq_number = state.curr_snd_seq_number + 1;
+                    packets if !packets.is_empty() => {
+                        state.curr_snd_seq_number =
+                            state.curr_snd_seq_number + packets.len() as i32;
                         if state.curr_snd_seq_number.number() % 16 == 0 {
                             probe = true;
                         }
-                        packet
+                        packets
                     }
-                    None => return Ok(None),
+                    _ => return Ok(None),
                 }
             }
         };
 
         // update CC and stats
         if probe {
-            return Ok(Some((packet, now)));
+            return Ok(Some((packets, now)));
         }
 
         // TODO keep track of difference with target time
-        Ok(Some((packet, now + self.state().interpacket_interval)))
+        let packets_len = packets.len();
+        Ok(Some((
+            packets,
+            now + self.state().interpacket_interval * packets_len as u32,
+        )))
     }
 
     fn compute_cookie(&self, addr: &SocketAddr, offset: Option<isize>) -> u32 {
@@ -676,6 +680,16 @@ impl UdtSocket {
     pub(crate) async fn send_packet(&self, packet: UdtPacket) -> Result<()> {
         if let Some(addr) = self.peer_addr() {
             self.send_to(&addr, packet).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn send_data_packets(&self, packets: Vec<UdtDataPacket>) -> Result<()> {
+        if let Some(addr) = self.peer_addr() {
+            self.multiplexer()
+                .expect("multiplexer not initialized")
+                .send_mmsg_to(&addr, packets.into_iter().map(|p| p.into()))
+                .await?;
         }
         Ok(())
     }

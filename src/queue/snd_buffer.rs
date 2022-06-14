@@ -2,13 +2,16 @@ use crate::data_packet::{PacketPosition, UdtDataPacket, UdtDataPacketHeader};
 use crate::seq_number::MsgNumber;
 use crate::seq_number::SeqNumber;
 use crate::socket::SocketId;
+use bytes::Bytes;
 use std::collections::VecDeque;
 use tokio::io::{Error, ErrorKind, Result as IoResult};
 use tokio::time::{Duration, Instant};
 
-#[derive(Debug)]
-struct SndBufferBlock {
-    data: Vec<u8>,
+const FETCH_BATCH_SIZE: usize = 100;
+
+#[derive(Debug, Clone)]
+pub(crate) struct SndBufferBlock {
+    data: Bytes,
     msg_number: MsgNumber,
     origin_time: Instant,
     ttl: Option<u64>, // milliseconds,
@@ -31,14 +34,14 @@ impl SndBufferBlock {
         start_time: Instant,
     ) -> UdtDataPacket {
         UdtDataPacket {
-            data: self.data.to_vec(),
+            data: self.data.clone(),
             header: UdtDataPacketHeader {
                 msg_number: self.msg_number,
                 dest_socket_id,
                 seq_number,
                 in_order: self.in_order,
                 position: self.position,
-                timestamp: (start_time.elapsed().as_micros() & u32::MAX as u128) as u32,
+                timestamp: (start_time.elapsed().as_micros() & (u32::MAX as u128)) as u32,
             },
         }
     }
@@ -76,7 +79,7 @@ impl SndBuffer {
 
         self.buffer
             .extend(chunks.enumerate().map(|(idx, chunk)| SndBufferBlock {
-                data: chunk.to_vec(),
+                data: Bytes::copy_from_slice(chunk),
                 msg_number,
                 origin_time: now,
                 ttl,
@@ -137,18 +140,24 @@ impl SndBuffer {
         }
     }
 
-    pub fn fetch(
+    pub fn fetch_batch(
         &mut self,
-        seq_number: SeqNumber,
+        mut seq_number: SeqNumber,
         dest_socket_id: SocketId,
         start_time: Instant,
-    ) -> Option<UdtDataPacket> {
-        if self.current_position >= self.buffer.len() {
-            return None;
-        }
-        let block = &self.buffer[self.current_position];
-        self.current_position += 1;
-        Some(block.as_data_packet(seq_number, dest_socket_id, start_time))
+    ) -> Vec<UdtDataPacket> {
+        let blocks: Vec<_> = self
+            .buffer
+            .range(self.current_position..)
+            .take(FETCH_BATCH_SIZE)
+            .map(|block| {
+                let packet = block.as_data_packet(seq_number, dest_socket_id, start_time);
+                seq_number = seq_number + 1;
+                packet
+            })
+            .collect();
+        self.current_position += blocks.len();
+        blocks
     }
 
     pub fn is_empty(&self) -> bool {

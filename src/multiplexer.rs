@@ -2,10 +2,14 @@ use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
 use crate::queue::{UdtRcvQueue, UdtSndQueue};
 use crate::udt::SocketRef;
+use nix::sys::socket::{sendmmsg, MsgFlags, SendMmsgData, SockaddrStorage};
 use socket2::{Domain, Socket, Type};
+use std::io::IoSlice;
 use std::io::Result;
 use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
+use tokio::io::{Error, ErrorKind, Interest};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
@@ -99,6 +103,42 @@ impl UdtMultiplexer {
 
     pub(crate) async fn send_to(&self, addr: &SocketAddr, packet: UdtPacket) -> Result<usize> {
         self.channel.send_to(&packet.serialize(), addr).await
+    }
+
+    pub(crate) async fn send_mmsg_to(
+        &self,
+        addr: &SocketAddr,
+        packets: impl Iterator<Item = UdtPacket>,
+    ) -> Result<usize> {
+        let data: Vec<_> = packets.map(|p| p.serialize()).collect();
+        let dest: SockaddrStorage = (*addr).into();
+        let buffers: Vec<SendMmsgData<_, _, _>> = data
+            .iter()
+            .map(|packet| SendMmsgData {
+                iov: [IoSlice::new(packet)],
+                cmsgs: &[],
+                addr: Some(dest),
+                _lt: Default::default(),
+            })
+            .collect();
+        self.channel.writable().await?;
+        let sent = self
+            .channel
+            .try_io(Interest::WRITABLE, || {
+                let sock_fd = self.channel.as_raw_fd();
+                let sent: usize = sendmmsg(sock_fd, &buffers, MsgFlags::MSG_DONTWAIT)
+                    .map_err(|err| {
+                        if err == nix::errno::Errno::EWOULDBLOCK {
+                            return Error::new(ErrorKind::WouldBlock, "sendmmsg would block");
+                        }
+                        Error::new(ErrorKind::Other, err)
+                    })?
+                    .into_iter()
+                    .sum();
+                Ok(sent)
+            })
+            .unwrap_or(0);
+        Ok(sent)
     }
 
     // pub fn get_local_addr(&self) -> SocketAddr {

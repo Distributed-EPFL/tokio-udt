@@ -119,7 +119,7 @@ impl Udt {
         let new_socket = {
             let multiplexer = listener_socket
                 .multiplexer
-                .lock()
+                .read()
                 .unwrap()
                 .upgrade()
                 .ok_or_else(|| Error::new(ErrorKind::Other, "Listener has no multiplexer"))?;
