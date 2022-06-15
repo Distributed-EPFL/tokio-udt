@@ -9,27 +9,33 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Waiting for connection...");
-
-    let (addr, mut connection) = listener.accept().await.unwrap();
-
-    println!("Accepted connection from {}", addr);
-
-    let mut buffer = Vec::with_capacity(20_000_000);
-    let mut last = Instant::now();
-    let mut bytes = 0;
+    println!("Waiting for connections...");
 
     loop {
-        let size = connection.read_buf(&mut buffer).await.unwrap();
-        bytes += size;
+        let (addr, mut connection) = listener.accept().await.unwrap();
 
-        if last.elapsed() > Duration::new(1, 0) {
-            last = Instant::now();
-            println!("Received {} MB", bytes as f64 / 1e6);
-        }
+        println!("Accepted connection from {}", addr);
 
-        if buffer.len() >= 10_000_000 {
-            buffer.clear();
-        }
+        let mut buffer = Vec::with_capacity(20_000_000);
+
+        tokio::task::spawn({
+            let mut bytes = 0;
+            let mut last = Instant::now();
+            async move {
+                loop {
+                    let size = connection.read_buf(&mut buffer).await.unwrap();
+                    bytes += size;
+
+                    if last.elapsed() > Duration::new(1, 0) {
+                        last = Instant::now();
+                        println!("Received {} MB", bytes as f64 / 1e6);
+                    }
+
+                    if buffer.len() >= 10_000_000 {
+                        buffer.clear();
+                    }
+                }
+            }
+        });
     }
 }
