@@ -2,15 +2,21 @@ use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtStatus};
 use crate::udt::{SocketRef, Udt};
+use nix::sys::socket::{
+    recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrLike, SockaddrStorage,
+};
 use std::collections::{BTreeMap, VecDeque};
+use std::io::IoSliceMut;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex, Weak};
-use tokio::io::{Error, ErrorKind, Result};
+use tokio::io::{Error, ErrorKind, Interest, Result};
 use tokio::net::UdpSocket;
 use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
 
 const TIMERS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
-const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(100);
+const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(20);
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
@@ -67,20 +73,71 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
-        let mut buf = vec![0_u8; self.payload_size as usize];
         loop {
-            if let Some((size, addr)) = {
-                let res = self.channel.try_recv_from(&mut buf).ok();
-                if res.is_some() {
-                    res
+            let packets = {
+                let mut buf = vec![0_u8; self.payload_size as usize * 100];
+                let bufs = buf.chunks_exact_mut(self.payload_size as usize);
+
+                let mut recv_mesg_data: Vec<RecvMmsgData<_>> = bufs
+                    .map(|b| RecvMmsgData {
+                        iov: [IoSliceMut::new(&mut b[..])],
+                        cmsg_buffer: None,
+                    })
+                    .collect();
+
+                let msgs: Vec<_> = self
+                    .channel
+                    .try_io(Interest::READABLE, || {
+                        let msgs = recvmmsg(
+                            self.channel.as_raw_fd(),
+                            &mut recv_mesg_data,
+                            MsgFlags::MSG_DONTWAIT,
+                            None,
+                        )
+                        .map_err(|err| {
+                            if err == nix::errno::Errno::EWOULDBLOCK {
+                                return Error::new(ErrorKind::WouldBlock, "recvmmsg would block");
+                            }
+                            Error::new(ErrorKind::Other, err)
+                        })?
+                        .iter()
+                        .map(|msg| {
+                            let addr: SockaddrStorage = msg.address.unwrap();
+                            (msg.bytes, addr)
+                        })
+                        .collect();
+                        Ok(msgs)
+                    })
+                    .unwrap_or_default();
+
+                if !msgs.is_empty() {
+                    msgs.into_iter()
+                        .zip(buf.chunks_exact_mut(self.payload_size as usize))
+                        .filter_map(|((nbytes, addr), buf)| {
+                            let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
+                            let addr: SocketAddr = match addr.family() {
+                                Some(AddressFamily::Inet) => {
+                                    SocketAddrV4::from(*addr.as_sockaddr_in().unwrap()).into()
+                                }
+                                Some(AddressFamily::Inet6) => {
+                                    SocketAddrV6::from(*addr.as_sockaddr_in6().unwrap()).into()
+                                }
+                                _ => unreachable!(),
+                            };
+                            Some((packet, addr))
+                        })
+                        .collect()
                 } else {
                     tokio::select! {
-                        r = self.channel.recv_from(&mut buf) => Some(r?),
-                        _ = sleep(UDP_RCV_TIMEOUT) => None,
-                    }
+                        _ = sleep(UDP_RCV_TIMEOUT) => (),
+                        _ = self.channel.readable() => ()
+
+                    };
+                    vec![]
                 }
-            } {
-                let packet = UdtPacket::deserialize(&buf[..size])?;
+            };
+
+            for (packet, addr) in packets {
                 let socket_id = packet.get_dest_socket_id();
                 if socket_id == 0 {
                     if let Some(handshake) = packet.handshake() {
@@ -134,7 +191,7 @@ impl UdtRcvQueue {
                 .collect();
 
             for socket_id in to_check {
-                if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
+                if let Some(socket) = self.get_socket(socket_id).await {
                     socket.check_timers().await;
                 }
             }
