@@ -5,7 +5,7 @@ use tokio::io::AsyncReadExt;
 
 #[tokio::main]
 async fn main() {
-    let listener = UdtListener::bind("0.0.0.0:9000".parse().unwrap(), 10)
+    let listener = UdtListener::bind("0.0.0.0:9000".parse().unwrap(), None)
         .await
         .unwrap();
 

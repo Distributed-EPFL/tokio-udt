@@ -4,7 +4,7 @@ use tokio_udt::UdtConnection;
 
 #[tokio::main]
 async fn main() {
-    let mut connection = UdtConnection::connect("127.0.0.1:9000".parse().unwrap())
+    let mut connection = UdtConnection::connect("127.0.0.1:9000".parse().unwrap(), None)
         .await
         .unwrap();
 

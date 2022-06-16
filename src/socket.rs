@@ -58,7 +58,6 @@ pub struct UdtSocket {
 
     pub(crate) queued_sockets: TokioRwLock<BTreeSet<SocketId>>,
     pub(crate) accept_notify: Notify,
-    pub(crate) backlog_size: usize,
     pub(crate) multiplexer: RwLock<Weak<UdtMultiplexer>>,
     pub configuration: RwLock<UdtConfiguration>,
 
@@ -80,10 +79,11 @@ impl UdtSocket {
         socket_id: SocketId,
         socket_type: SocketType,
         isn: Option<SeqNumber>,
+        configuration: Option<UdtConfiguration>,
     ) -> Self {
         let now = Instant::now();
         let initial_seq_number = isn.unwrap_or_else(SeqNumber::random);
-        let configuration = UdtConfiguration::default();
+        let configuration = configuration.unwrap_or_default();
         Self {
             socket_id,
             socket_type,
@@ -94,7 +94,6 @@ impl UdtSocket {
             listen_socket: None,
             queued_sockets: TokioRwLock::new(BTreeSet::new()),
             accept_notify: Notify::new(),
-            backlog_size: 0,
             multiplexer: RwLock::new(Weak::new()),
             snd_buffer: Mutex::new(SndBuffer::new(configuration.snd_buf_size)),
             rcv_buffer: Mutex::new(RcvBuffer::new(

@@ -1,3 +1,4 @@
+use crate::configuration::UdtConfiguration;
 use crate::socket::{SocketType, UdtStatus};
 use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
@@ -14,20 +15,19 @@ impl UdtConnection {
         Self { socket }
     }
 
-    pub async fn connect(addr: SocketAddr) -> Result<Self> {
+    pub async fn connect(addr: SocketAddr, config: Option<UdtConfiguration>) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
-            udt.new_socket(SocketType::Stream, 10)?.clone()
+            udt.new_socket(SocketType::Stream, config)?.clone()
         };
         socket.connect(addr).await?;
-        let connection = Self::new(socket.clone());
         loop {
-            if connection.socket.status() == UdtStatus::Connected {
+            if socket.status() == UdtStatus::Connected {
                 break;
             }
-            connection.socket.connect_notify.notified().await;
+            socket.connect_notify.notified().await;
         }
-        Ok(connection)
+        Ok(Self::new(socket))
     }
 
     pub async fn send(&self, msg: &[u8]) -> Result<()> {

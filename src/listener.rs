@@ -1,3 +1,4 @@
+use crate::configuration::UdtConfiguration;
 use crate::connection::UdtConnection;
 use crate::socket::{SocketType, UdtStatus};
 use crate::udt::{SocketRef, Udt};
@@ -9,10 +10,10 @@ pub struct UdtListener {
 }
 
 impl UdtListener {
-    pub async fn bind(bind_addr: SocketAddr, backlog: usize) -> Result<Self> {
+    pub async fn bind(bind_addr: SocketAddr, config: Option<UdtConfiguration>) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
-            udt.new_socket(SocketType::Stream, backlog)?.clone()
+            udt.new_socket(SocketType::Stream, config)?.clone()
         };
 
         if socket.configuration.read().unwrap().rendezvous {

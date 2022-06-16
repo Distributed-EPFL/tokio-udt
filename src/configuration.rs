@@ -5,19 +5,20 @@ const UDT_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub struct UdtConfiguration {
-    pub(crate) mss: u32,
-    pub(crate) flight_flag_size: u32,
+    pub mss: u32,
+    pub flight_flag_size: u32,
     pub snd_buf_size: u32,
     pub rcv_buf_size: u32,
-    linger_timeout: Option<u32>,
-    pub(crate) udp_snd_buf_size: usize,
-    pub(crate) udp_rcv_buf_size: usize,
-    pub reuse_addr: bool,
+    pub udp_snd_buf_size: usize,
+    pub udp_rcv_buf_size: usize,
+    pub reuse_mux: bool,
     // snd_timeout
     // rcv_timeout
     // socktype
     // ip_version
-    pub(crate) rendezvous: bool,
+    pub rendezvous: bool,
+    pub accept_queue_size: usize,
+    linger_timeout: Option<u32>,
 }
 
 impl UdtConfiguration {
@@ -36,8 +37,9 @@ impl Default for UdtConfiguration {
             udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_rcv_buf_size: DEFAULT_UDP_BUF_SIZE,
             linger_timeout: Some(180),
-            reuse_addr: true,
+            reuse_mux: true,
             rendezvous: false,
+            accept_queue_size: 100,
         }
     }
 }

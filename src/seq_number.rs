@@ -39,17 +39,11 @@ impl<T: SeqConstants> GenericSeqNumber<T> {
     }
 
     pub fn zero() -> Self {
-        Self {
-            number: 0,
-            phantom: PhantomData,
-        }
+        0.into()
     }
 
     pub fn max() -> Self {
-        Self {
-            number: T::MAX_NUMBER,
-            phantom: PhantomData,
-        }
+        T::MAX_NUMBER.into()
     }
 }
 

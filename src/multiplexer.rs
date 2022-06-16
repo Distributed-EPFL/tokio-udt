@@ -65,7 +65,7 @@ impl UdtMultiplexer {
         let mux = Self {
             id,
             port,
-            reusable: config.reuse_addr,
+            reusable: config.reuse_mux,
             mss: config.mss,
             channel: channel.clone(),
             snd_queue: UdtSndQueue::new(),
@@ -89,7 +89,7 @@ impl UdtMultiplexer {
         let mux = Self {
             id,
             port,
-            reusable: config.reuse_addr,
+            reusable: config.reuse_mux,
             mss: config.mss,
             channel: channel.clone(),
             snd_queue: UdtSndQueue::new(),

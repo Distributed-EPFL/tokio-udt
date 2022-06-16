@@ -15,5 +15,6 @@ mod socket;
 mod state;
 mod udt;
 
+pub use configuration::UdtConfiguration;
 pub use connection::UdtConnection;
 pub use listener::UdtListener;

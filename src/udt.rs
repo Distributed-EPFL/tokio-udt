@@ -21,7 +21,6 @@ pub(crate) struct Udt {
     // closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Arc<UdtMultiplexer>>,
     next_socket_id: SocketId,
-    pub configuration: UdtConfiguration,
     peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketId>>, // peer socket id -> local socket id
 }
 
@@ -74,10 +73,9 @@ impl Udt {
     pub fn new_socket(
         &mut self,
         socket_type: SocketType,
-        backlog_size: usize,
+        config: Option<UdtConfiguration>,
     ) -> Result<&SocketRef> {
-        let mut socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None);
-        socket.backlog_size = backlog_size;
+        let socket = UdtSocket::new(self.get_new_socket_id(), socket_type, None, config);
         let socket_id = socket.socket_id;
         if let Entry::Vacant(e) = self.sockets.entry(socket_id) {
             return Ok(e.insert(Arc::new(socket)));
@@ -124,14 +122,19 @@ impl Udt {
                 .upgrade()
                 .ok_or_else(|| Error::new(ErrorKind::Other, "Listener has no multiplexer"))?;
 
-            if listener_socket.queued_sockets.read().await.len() >= listener_socket.backlog_size {
+            let config = listener_socket.configuration.read().unwrap().clone();
+            if listener_socket.queued_sockets.read().await.len() >= config.accept_queue_size {
                 return Err(Error::new(ErrorKind::Other, "Too many queued sockets"));
             }
 
-            let new_socket =
-                UdtSocket::new(new_socket_id, hs.socket_type, Some(hs.initial_seq_number))
-                    .with_peer(peer, hs.socket_id)
-                    .with_listen_socket(listener_socket.socket_id, multiplexer);
+            let new_socket = UdtSocket::new(
+                new_socket_id,
+                hs.socket_type,
+                Some(hs.initial_seq_number),
+                Some(config),
+            )
+            .with_peer(peer, hs.socket_id)
+            .with_listen_socket(listener_socket.socket_id, multiplexer);
             new_socket.open();
             new_socket
         };
@@ -171,15 +174,13 @@ impl Udt {
         socket: &UdtSocket,
         bind_addr: Option<SocketAddr>,
     ) -> Result<()> {
-        if self.configuration.reuse_addr {
-            if let Some(bind_addr) = bind_addr {
-                let port = bind_addr.port();
-                for mux in self.multiplexers.values() {
-                    let socket_mss = socket.configuration.read().unwrap().mss;
-                    if mux.reusable && mux.port == port && mux.mss == socket_mss {
-                        socket.set_multiplexer(mux);
-                        return Ok(());
-                    }
+        if let Some(bind_addr) = bind_addr {
+            let port = bind_addr.port();
+            for mux in self.multiplexers.values() {
+                let socket_mss = socket.configuration.read().unwrap().mss;
+                if mux.reusable && mux.port == port && mux.mss == socket_mss {
+                    socket.set_multiplexer(mux);
+                    return Ok(());
                 }
             }
         }
