@@ -599,7 +599,8 @@ impl UdtSocket {
     }
 
     async fn process_data(&self, packet: UdtDataPacket) -> Result<()> {
-        self.state().last_rsp_time = Instant::now();
+        let now = Instant::now();
+        self.state().last_rsp_time = now;
 
         // CC onPktReceived
         // pktCount++
@@ -608,7 +609,7 @@ impl UdtSocket {
 
         {
             let mut flow = self.flow.write().unwrap();
-            flow.on_pkt_arrival();
+            flow.on_pkt_arrival(now);
 
             if seq_number.number() % PROBE_MODULO == 0 {
                 flow.on_probe1_arrival();
@@ -624,14 +625,20 @@ impl UdtSocket {
             // seq number is too late
             return Ok(());
         }
-        let available_buf_size = self.rcv_buffer().get_available_buf_size();
-        if available_buf_size < offset as u32 {
-            eprintln!("not enough space in rcv buffer");
-            return Ok(());
-        }
 
-        let payload_len = packet.payload_len();
-        self.rcv_buffer().insert(packet);
+        let payload_len = {
+            let mut rcv_buffer = self.rcv_buffer();
+            let available_buf_size = rcv_buffer.get_available_buf_size();
+            if available_buf_size < offset as u32 {
+                eprintln!("not enough space in rcv buffer");
+                return Ok(());
+            }
+
+            let payload_len = packet.payload_len();
+            rcv_buffer.insert(packet);
+            payload_len
+        };
+
         if (seq_number - self.state().curr_rcv_seq_number) > 1 {
             // some packets have been lost in between
             let nak_packet = {

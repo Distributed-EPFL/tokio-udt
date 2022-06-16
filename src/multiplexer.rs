@@ -44,6 +44,7 @@ impl UdtMultiplexer {
                 let socket = Socket::new(domain, Type::DGRAM, None)?;
                 socket.set_recv_buffer_size(config.udp_rcv_buf_size)?;
                 socket.set_send_buffer_size(config.udp_snd_buf_size)?;
+                socket.set_reuse_port(true)?;
                 socket.set_nonblocking(true)?;
                 if let Some(addr) = bind_addr {
                     socket.bind(&addr.into())?;

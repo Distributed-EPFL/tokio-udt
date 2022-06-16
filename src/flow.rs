@@ -37,8 +37,7 @@ impl Default for UdtFlow {
 }
 
 impl UdtFlow {
-    pub fn on_pkt_arrival(&mut self) {
-        let now = Instant::now();
+    pub fn on_pkt_arrival(&mut self, now: Instant) {
         self.arrival_window.push_back(now - self.last_arrival_time);
         if self.arrival_window.len() > ARRIVAL_WINDOW_SIZE {
             self.arrival_window.pop_front();

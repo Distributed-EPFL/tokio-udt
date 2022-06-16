@@ -21,17 +21,17 @@ const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(20);
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
     sockets: Mutex<VecDeque<(Instant, SocketId)>>,
-    payload_size: u32,
+    mss: u32,
     channel: Arc<UdpSocket>,
     multiplexer: Mutex<Weak<UdtMultiplexer>>,
     socket_refs: Mutex<BTreeMap<SocketId, SocketRef>>,
 }
 
 impl UdtRcvQueue {
-    pub fn new(channel: Arc<UdpSocket>, payload_size: u32) -> Self {
+    pub fn new(channel: Arc<UdpSocket>, mss: u32) -> Self {
         Self {
             sockets: Mutex::new(VecDeque::new()),
-            payload_size,
+            mss,
             channel,
             multiplexer: Mutex::new(Weak::new()),
             socket_refs: Mutex::new(BTreeMap::new()),
@@ -73,10 +73,11 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
+        let mut buf = vec![0_u8; self.mss as usize * 100];
+
         loop {
             let packets = {
-                let mut buf = vec![0_u8; self.payload_size as usize * 100];
-                let bufs = buf.chunks_exact_mut(self.payload_size as usize);
+                let bufs = buf.chunks_exact_mut(self.mss as usize);
 
                 let mut recv_mesg_data: Vec<RecvMmsgData<_>> = bufs
                     .map(|b| RecvMmsgData {
@@ -112,7 +113,7 @@ impl UdtRcvQueue {
 
                 if !msgs.is_empty() {
                     msgs.into_iter()
-                        .zip(buf.chunks_exact_mut(self.payload_size as usize))
+                        .zip(buf.chunks_exact_mut(self.mss as usize))
                         .filter_map(|((nbytes, addr), buf)| {
                             let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
                             let addr: SocketAddr = match addr.family() {
