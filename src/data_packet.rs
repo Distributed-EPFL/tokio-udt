@@ -2,6 +2,8 @@ use crate::seq_number::{MsgNumber, SeqNumber};
 use bytes::Bytes;
 use tokio::io::{Error, ErrorKind, Result};
 
+pub const UDT_DATA_HEADER_SIZE: usize = 16;
+
 #[derive(Debug)]
 pub(crate) struct UdtDataPacket {
     pub header: UdtDataPacketHeader,
@@ -10,8 +12,8 @@ pub(crate) struct UdtDataPacket {
 
 impl UdtDataPacket {
     pub fn deserialize(raw: &[u8]) -> Result<Self> {
-        let header = UdtDataPacketHeader::deserialize(&raw[..16])?;
-        let data = Bytes::copy_from_slice(&raw[16..]);
+        let header = UdtDataPacketHeader::deserialize(&raw[..UDT_DATA_HEADER_SIZE])?;
+        let data = Bytes::copy_from_slice(&raw[UDT_DATA_HEADER_SIZE..]);
         Ok(Self { header, data })
     }
 
@@ -20,7 +22,7 @@ impl UdtDataPacket {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(1600);
+        let mut buffer = Vec::with_capacity(1500);
         buffer.extend_from_slice(&self.header.serialize());
         buffer.extend_from_slice(&self.data);
         buffer
@@ -63,7 +65,7 @@ impl UdtDataPacketHeader {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(16);
+        let mut buffer: Vec<u8> = Vec::with_capacity(UDT_DATA_HEADER_SIZE);
         buffer.extend_from_slice(&self.seq_number.number().to_be_bytes());
 
         let block: u32 = ((self.position as u32) << 30)

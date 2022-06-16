@@ -1,9 +1,9 @@
 use crate::configuration::UdtConfiguration;
 use crate::control_packet::{AckOptionalInfo, ControlPacketType, HandShakeInfo, UdtControlPacket};
-use crate::data_packet::UdtDataPacket;
+use crate::data_packet::{UdtDataPacket, UDT_DATA_HEADER_SIZE};
 use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::multiplexer::UdtMultiplexer;
-use crate::packet::{UdtPacket, UDT_HEADER_SIZE};
+use crate::packet::UdtPacket;
 use crate::queue::{RcvBuffer, SndBuffer};
 use crate::seq_number::SeqNumber;
 use crate::state::SocketState;
@@ -27,8 +27,8 @@ pub type SocketId = u32;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum SocketType {
-    Stream = 0,
-    Datagram = 1,
+    Stream = 1,
+    Datagram = 2,
 }
 
 impl TryFrom<u32> for SocketType {
@@ -36,8 +36,8 @@ impl TryFrom<u32> for SocketType {
 
     fn try_from(value: u32) -> Result<Self> {
         match value {
-            0 => Ok(SocketType::Stream),
-            1 => Ok(SocketType::Datagram),
+            1 => Ok(SocketType::Stream),
+            2 => Ok(SocketType::Datagram),
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
                 "unknown value for socket type",
@@ -52,8 +52,8 @@ pub struct UdtSocket {
     pub status: Mutex<UdtStatus>,
     pub socket_type: SocketType,
     listen_socket: Option<SocketId>,
-    pub peer_addr: Mutex<Option<SocketAddr>>,
-    pub peer_socket_id: Mutex<Option<SocketId>>,
+    peer_addr: Mutex<Option<SocketAddr>>,
+    peer_socket_id: Mutex<Option<SocketId>>,
     pub initial_seq_number: SeqNumber,
 
     pub(crate) queued_sockets: TokioRwLock<BTreeSet<SocketId>>,
@@ -96,10 +96,7 @@ impl UdtSocket {
             accept_notify: Notify::new(),
             backlog_size: 0,
             multiplexer: RwLock::new(Weak::new()),
-            snd_buffer: Mutex::new(SndBuffer::new(
-                configuration.snd_buf_size,
-                configuration.mss,
-            )),
+            snd_buffer: Mutex::new(SndBuffer::new(configuration.snd_buf_size)),
             rcv_buffer: Mutex::new(RcvBuffer::new(
                 configuration.rcv_buf_size,
                 initial_seq_number,
@@ -116,10 +113,18 @@ impl UdtSocket {
         }
     }
 
-    pub async fn with_peer(self, peer: SocketAddr, peer_socket_id: SocketId) -> Self {
-        *self.peer_addr.lock().unwrap() = Some(peer);
+    pub fn with_peer(self, peer: SocketAddr, peer_socket_id: SocketId) -> Self {
+        self.set_peer_addr(peer);
         *self.peer_socket_id.lock().unwrap() = Some(peer_socket_id);
         self
+    }
+
+    fn set_peer_addr(&self, peer: SocketAddr) {
+        *self.peer_addr.lock().unwrap() = Some(peer);
+        self.snd_buffer
+            .lock()
+            .unwrap()
+            .set_payload_size(self.get_max_payload_size() as usize);
     }
 
     pub fn with_listen_socket(
@@ -176,7 +181,6 @@ impl UdtSocket {
         // TODO: use network information cache to set RTT, bandwidth, etc.
         // TODO: init congestion control
 
-        *self.peer_addr.lock().unwrap() = Some(peer);
         *self.status.lock().unwrap() = UdtStatus::Connected;
 
         let packet = UdtControlPacket::new_handshake(
@@ -672,8 +676,8 @@ impl UdtSocket {
     pub fn get_max_payload_size(&self) -> u32 {
         let configuration = self.configuration.read().unwrap();
         match self.peer_addr().map(|a| a.ip()) {
-            Some(IpAddr::V6(_)) => configuration.mss - 40 - UDT_HEADER_SIZE,
-            _ => configuration.mss - 28 - UDT_HEADER_SIZE,
+            Some(IpAddr::V6(_)) => configuration.mss - 40 - UDT_DATA_HEADER_SIZE as u32,
+            _ => configuration.mss - 28 - UDT_DATA_HEADER_SIZE as u32,
         }
     }
 
@@ -1018,7 +1022,7 @@ impl UdtSocket {
         }
 
         *self.status.lock().unwrap() = UdtStatus::Connecting;
-        *self.peer_addr.lock().unwrap() = Some(addr);
+        self.set_peer_addr(addr);
 
         // TODO: use rendezvous queue?
 
@@ -1047,6 +1051,10 @@ impl UdtSocket {
 
     pub fn status(&self) -> UdtStatus {
         *self.status.lock().unwrap()
+    }
+
+    pub fn snd_buffer_is_empty(&self) -> bool {
+        self.snd_buffer.lock().unwrap().is_empty()
     }
 }
 

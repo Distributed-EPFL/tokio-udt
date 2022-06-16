@@ -2,8 +2,6 @@ use super::control_packet::{ControlPacketType, HandShakeInfo, UdtControlPacket};
 use super::data_packet::UdtDataPacket;
 use tokio::io::{Error, ErrorKind, Result};
 
-pub const UDT_HEADER_SIZE: u32 = 16;
-
 #[derive(Debug)]
 pub(crate) enum UdtPacket {
     Control(UdtControlPacket),

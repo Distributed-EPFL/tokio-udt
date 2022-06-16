@@ -131,7 +131,6 @@ impl Udt {
             let new_socket =
                 UdtSocket::new(new_socket_id, hs.socket_type, Some(hs.initial_seq_number))
                     .with_peer(peer, hs.socket_id)
-                    .await
                     .with_listen_socket(listener_socket.socket_id, multiplexer);
             new_socket.open();
             new_socket

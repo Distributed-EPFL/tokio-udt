@@ -8,6 +8,7 @@ use tokio::io::{Error, ErrorKind, Result as IoResult};
 use tokio::time::{Duration, Instant};
 
 const FETCH_BATCH_SIZE: usize = 100;
+const DEFAULT_PAYLOAD_SIZE: usize = 1500;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SndBufferBlock {
@@ -51,17 +52,17 @@ impl SndBufferBlock {
 pub(crate) struct SndBuffer {
     max_size: u32,
     buffer: VecDeque<SndBufferBlock>,
-    mss: u32,
+    payload_size: usize,
     next_msg_number: MsgNumber,
     current_position: usize,
 }
 
 impl SndBuffer {
-    pub fn new(max_size: u32, mss: u32) -> Self {
+    pub fn new(max_size: u32) -> Self {
         Self {
             max_size,
             buffer: VecDeque::new(),
-            mss,
+            payload_size: DEFAULT_PAYLOAD_SIZE, // overwritten after connection
             next_msg_number: MsgNumber::zero(),
             current_position: 0,
         }
@@ -70,7 +71,7 @@ impl SndBuffer {
     pub fn add_message(&mut self, data: &[u8], ttl: Option<u64>, in_order: bool) -> IoResult<()> {
         let msg_number = self.next_msg_number;
         let now = Instant::now();
-        let chunks = data.chunks(self.mss as usize);
+        let chunks = data.chunks(self.payload_size);
         let chunks_len = chunks.len();
 
         if self.buffer.len() + chunks_len > self.max_size as usize {
@@ -162,5 +163,9 @@ impl SndBuffer {
 
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
+    }
+
+    pub fn set_payload_size(&mut self, payload_size: usize) {
+        self.payload_size = payload_size;
     }
 }

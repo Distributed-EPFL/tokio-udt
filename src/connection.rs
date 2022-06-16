@@ -81,8 +81,19 @@ impl AsyncWrite for UdtConnection {
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
-        Poll::Ready(Ok(()))
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        match self.socket.snd_buffer_is_empty() {
+            true => Poll::Ready(Ok(())),
+            false => {
+                let waker = cx.waker().clone();
+                let socket = self.socket.clone();
+                tokio::spawn(async move {
+                    socket.ack_notify.notified().await;
+                    waker.wake();
+                });
+                Poll::Pending
+            }
+        }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
