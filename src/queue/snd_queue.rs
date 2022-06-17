@@ -1,9 +1,8 @@
-use crate::socket::SocketId;
-use crate::udt::SocketRef;
-use crate::udt::Udt;
+use crate::socket::{SocketId, UdtSocket};
+use crate::udt::{SocketRef, Udt};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 use tokio::io::Result;
 use tokio::sync::Notify;
 use tokio::time::Instant;
@@ -33,7 +32,7 @@ pub(crate) struct UdtSndQueue {
     queue: Mutex<BinaryHeap<SendQueueNode>>,
     notify: Notify,
     start_time: Instant,
-    socket_refs: Mutex<BTreeMap<SocketId, SocketRef>>,
+    socket_refs: Mutex<BTreeMap<SocketId, Weak<UdtSocket>>>,
 }
 
 impl UdtSndQueue {
@@ -49,12 +48,12 @@ impl UdtSndQueue {
     async fn get_socket(&self, socket_id: SocketId) -> Option<SocketRef> {
         let known_socket = self.socket_refs.lock().unwrap().get(&socket_id).cloned();
         if let Some(socket) = known_socket {
-            Some(socket)
+            socket.upgrade()
         } else if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
             self.socket_refs
                 .lock()
                 .unwrap()
-                .insert(socket_id, socket.clone());
+                .insert(socket_id, Arc::downgrade(&socket));
             Some(socket)
         } else {
             None
