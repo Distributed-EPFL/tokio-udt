@@ -176,7 +176,6 @@ impl ControlPacketType {
             Self::Ack(ack) => ack.serialize(),
             Self::Nak(nak) => nak.serialize(),
             Self::MsgDropRequest(drop) => drop.serialize(),
-            // TODO serialize ACK, NAK and MessageDrop
             _ => vec![],
         }
     }
@@ -241,9 +240,11 @@ impl HandShakeInfo {
             |idx: usize| u32::from_be_bytes(raw[(idx * 4)..(idx + 1) * 4].try_into().unwrap());
         let addr: IpAddr = {
             if raw[36..48].iter().all(|b| *b == 0) {
+                // IPv4
                 let octets: [u8; 4] = raw[32..36].try_into().unwrap();
                 octets.into()
             } else {
+                // IPv6
                 let octets: [u8; 16] = raw[32..48].try_into().unwrap();
                 octets.into()
             }

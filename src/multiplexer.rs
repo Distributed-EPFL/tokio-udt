@@ -149,8 +149,10 @@ impl UdtMultiplexer {
     // }
 
     pub fn run(mux: Arc<Self>) {
-        let mux2 = mux.clone();
-        tokio::spawn(async move { mux.rcv_queue.worker().await.unwrap() });
-        tokio::spawn(async move { mux2.snd_queue.worker().await.unwrap() });
+        tokio::spawn({
+            let mux = mux.clone();
+            async move { mux.rcv_queue.worker().await.unwrap() }
+        });
+        tokio::spawn(async move { mux.snd_queue.worker().await.unwrap() });
     }
 }

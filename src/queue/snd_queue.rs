@@ -61,6 +61,15 @@ impl UdtSndQueue {
     }
 
     pub async fn worker(&self) -> Result<()> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(20);
+
+        tokio::spawn(async move {
+            while let Some((socket, packets)) = rx.recv().await {
+                let socket: SocketRef = socket;
+                socket.send_data_packets(packets).await.expect("failed to send packets")
+            }
+        });
+
         loop {
             let next_node = {
                 let mut sockets = self.queue.lock().unwrap();
@@ -81,7 +90,7 @@ impl UdtSndQueue {
                     if let Some(socket) = self.get_socket(node.socket_id).await {
                         if let Some((packets, ts)) = socket.next_data_packets().await? {
                             self.insert(ts, node.socket_id);
-                            socket.send_data_packets(packets).await?;
+                            tx.send((socket, packets)).await.unwrap();
                         }
                     }
                 }

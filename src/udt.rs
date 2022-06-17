@@ -1,5 +1,5 @@
 use super::configuration::UdtConfiguration;
-use crate::control_packet::HandShakeInfo;
+use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::multiplexer::{MultiplexerId, UdtMultiplexer};
 use crate::seq_number::SeqNumber;
 use crate::socket::{SocketId, SocketType, UdtSocket, UdtStatus};
@@ -104,11 +104,21 @@ impl Udt {
                     Set timestamp? and remove from queued sockets and accept sockets?
                 */
             } else {
-                /*  TODO:
-                    Respond with existing socket configuration.
-                    Mutate handshake info?
-                */
-                unimplemented!()
+                // Respond with existing socket configuration.
+                let source_socket_id = hs.socket_id;
+                let hs = {
+                    let mut hs = hs.clone();
+                    let configuration = socket.configuration.read().unwrap();
+                    hs.initial_seq_number = socket.initial_seq_number;
+                    hs.max_packet_size = configuration.mss;
+                    hs.max_window_size = configuration.flight_flag_size;
+                    hs.connection_type = -1;
+                    hs.socket_id = socket.socket_id;
+                    hs
+                };
+                let packet = UdtControlPacket::new_handshake(hs, source_socket_id);
+                socket.send_to(&peer, packet.into()).await?;
+                return Ok(());
             }
         }
 
@@ -174,13 +184,15 @@ impl Udt {
         socket: &UdtSocket,
         bind_addr: Option<SocketAddr>,
     ) -> Result<()> {
-        if let Some(bind_addr) = bind_addr {
-            let port = bind_addr.port();
-            for mux in self.multiplexers.values() {
-                let socket_mss = socket.configuration.read().unwrap().mss;
-                if mux.reusable && mux.port == port && mux.mss == socket_mss {
-                    socket.set_multiplexer(mux);
-                    return Ok(());
+        if socket.configuration.read().unwrap().reuse_mux {
+            if let Some(bind_addr) = bind_addr {
+                let port = bind_addr.port();
+                for mux in self.multiplexers.values() {
+                    let socket_mss = socket.configuration.read().unwrap().mss;
+                    if mux.reusable && mux.port == port && mux.mss == socket_mss {
+                        socket.set_multiplexer(mux);
+                        return Ok(());
+                    }
                 }
             }
         }

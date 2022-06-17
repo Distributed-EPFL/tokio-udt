@@ -8,6 +8,9 @@ use crate::queue::{RcvBuffer, SndBuffer};
 use crate::seq_number::SeqNumber;
 use crate::state::SocketState;
 use crate::udt::{SocketRef, Udt};
+use once_cell::sync::Lazy;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -22,6 +25,14 @@ pub(crate) const SYN_INTERVAL: Duration = Duration::from_millis(10);
 const MIN_EXP_INTERVAL: Duration = Duration::from_millis(300);
 const ACK_INTERVAL: Duration = SYN_INTERVAL;
 const PACKETS_BETWEEN_LIGHT_ACK: usize = 64;
+
+static SALT: Lazy<String> = Lazy::new(|| {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(30)
+        .map(char::from)
+        .collect()
+});
 
 pub type SocketId = u32;
 
@@ -314,8 +325,9 @@ impl UdtSocket {
         let timestamp = (self.start_time.elapsed().as_secs() / 60) + offset.unwrap_or(0) as u64; // secret changes every one minute
         let host = addr.ip();
         let port = addr.port();
+        let salt: &str = &(*SALT);
         u32::from_be_bytes(
-            Sha256::digest(format!("{host}:{port}:{timestamp}").as_bytes())[..4]
+            Sha256::digest(format!("{salt}:{host}:{port}:{timestamp}").as_bytes())[..4]
                 .try_into()
                 .unwrap(),
         )
