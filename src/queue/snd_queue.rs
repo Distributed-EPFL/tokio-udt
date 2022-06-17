@@ -66,7 +66,10 @@ impl UdtSndQueue {
         tokio::spawn(async move {
             while let Some((socket, packets)) = rx.recv().await {
                 let socket: SocketRef = socket;
-                socket.send_data_packets(packets).await.expect("failed to send packets")
+                socket
+                    .send_data_packets(packets)
+                    .await
+                    .expect("failed to send packets")
             }
         });
 

@@ -5,6 +5,7 @@ use crate::flow::{UdtFlow, PROBE_MODULO};
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::queue::{RcvBuffer, SndBuffer};
+use crate::rate_control::RateControl;
 use crate::seq_number::SeqNumber;
 use crate::state::SocketState;
 use crate::udt::{SocketRef, Udt};
@@ -75,6 +76,7 @@ pub struct UdtSocket {
     rcv_buffer: Mutex<RcvBuffer>,
     snd_buffer: Mutex<SndBuffer>,
     flow: RwLock<UdtFlow>,
+    rate_control: RwLock<RateControl>,
     // self_ip: Option<IpAddr>,
     start_time: Instant,
 
@@ -112,6 +114,7 @@ impl UdtSocket {
                 initial_seq_number,
             )),
             flow: RwLock::new(UdtFlow::default()),
+            rate_control: RwLock::new(RateControl::new()),
             // self_ip: None,
             start_time: now,
 
@@ -189,7 +192,11 @@ impl UdtSocket {
         hs.socket_id = self.socket_id;
 
         // TODO: use network information cache to set RTT, bandwidth, etc.
-        // TODO: init congestion control
+
+        {
+            let rate_control = self.rate_control.write().unwrap();
+            // TODO: init congestion control
+        }
 
         *self.status.lock().unwrap() = UdtStatus::Connected;
 

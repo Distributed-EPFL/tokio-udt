@@ -10,6 +10,7 @@ mod loss_list;
 mod multiplexer;
 mod packet;
 mod queue;
+mod rate_control;
 mod seq_number;
 mod socket;
 mod state;
