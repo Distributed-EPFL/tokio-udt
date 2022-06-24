@@ -291,8 +291,15 @@ impl UdtSocket {
                 }
             }
             None => {
-                // TODO: check congestion window
-                let window_size = self.flow.read().unwrap().flow_window_size;
+                let congestion_window_size = self
+                    .rate_control
+                    .read()
+                    .unwrap()
+                    .get_congestion_window_size();
+                let window_size = std::cmp::min(
+                    self.flow.read().unwrap().flow_window_size,
+                    congestion_window_size,
+                );
                 let mut state = self.state();
                 if (state.curr_snd_seq_number - state.last_ack_received) > window_size as i32 {
                     return Ok(None);
@@ -303,8 +310,12 @@ impl UdtSocket {
                     self.start_time,
                 ) {
                     packets if !packets.is_empty() => {
-                        state.curr_snd_seq_number =
-                            state.curr_snd_seq_number + packets.len() as i32;
+                        let new_snd_seq_number = state.curr_snd_seq_number + packets.len() as i32;
+                        state.curr_snd_seq_number = new_snd_seq_number;
+                        self.rate_control
+                            .write()
+                            .unwrap()
+                            .set_curr_snd_seq_number(new_snd_seq_number);
                         if state.curr_snd_seq_number.number() % 16 == 0 {
                             probe = true;
                         }
@@ -315,7 +326,7 @@ impl UdtSocket {
             }
         };
 
-        // update CC and stats
+        // update stats
         if probe {
             return Ok(Some((packets, now)));
         }
@@ -620,7 +631,6 @@ impl UdtSocket {
         let now = Instant::now();
         self.state().last_rsp_time = now;
 
-        // CC onPktReceived
         // pktCount++
 
         let seq_number = packet.header.seq_number;
@@ -823,9 +833,8 @@ impl UdtSocket {
     }
 
     fn cc_update(&self) {
-        // TODO update CC parameters
-
-        //self.interpacket_interval = ...
+        let mut state = self.state();
+        state.interpacket_interval = self.rate_control.read().unwrap().get_pkt_send_period();
     }
 
     pub(crate) async fn check_timers(&self) {
@@ -855,7 +864,6 @@ impl UdtSocket {
             }
         }
 
-        // TODO use user-defined RTO
         let next_exp_time = {
             let (rtt, rtt_var) = {
                 let flow = self.flow.read().unwrap();
