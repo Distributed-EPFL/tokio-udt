@@ -38,6 +38,12 @@ impl UdtConnection {
         let nbytes = self.socket.recv(buf).await?;
         Ok(nbytes)
     }
+
+    pub fn rate_control(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, crate::rate_control::RateControl> {
+        self.socket.rate_control.write().unwrap()
+    }
 }
 
 impl AsyncRead for UdtConnection {

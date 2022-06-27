@@ -27,9 +27,12 @@ pub(crate) struct SocketState {
 
     pub next_ack_time: Instant,
     pub interpacket_interval: Duration,
-    pub ack_packet_counter: usize,
+    pub interpacket_time_diff: Duration,
+    pub pkt_count: usize,
     pub light_ack_counter: usize,
     pub exp_count: u32,
+
+    pub next_data_target_time: Instant,
 
     pub ack_window: AckWindow,
 }
@@ -46,7 +49,8 @@ impl SocketState {
 
             next_ack_time: now + SYN_INTERVAL,
             interpacket_interval: Duration::from_micros(1),
-            ack_packet_counter: 0,
+            interpacket_time_diff: Duration::ZERO,
+            pkt_count: 0,
             light_ack_counter: 0,
 
             exp_count: 1,
@@ -60,6 +64,9 @@ impl SocketState {
             last_ack2_time: now,
             last_data_ack_processed: isn,
             snd_loss_list: LossList::new(),
+
+            next_data_target_time: now,
+
             ack_window: AckWindow::new(1024),
         }
     }
