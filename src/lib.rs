@@ -19,3 +19,5 @@ mod udt;
 pub use configuration::UdtConfiguration;
 pub use connection::UdtConnection;
 pub use listener::UdtListener;
+pub use rate_control::RateControl;
+pub use seq_number::SeqNumber;
