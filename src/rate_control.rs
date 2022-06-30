@@ -150,7 +150,7 @@ impl RateControl {
         let increase = if b <= 0.0 {
             MIN_INC
         } else {
-            let inc = 10.0_f64.powf((b * self.mss as f64 * 8.0).log10().ceil() * 1.5e-6 / self.mss);
+            let inc = 10.0_f64.powf((b * self.mss as f64 * 8.0).log10().ceil()) * 1.5e-6 / self.mss;
             if inc < MIN_INC {
                 MIN_INC
             } else {

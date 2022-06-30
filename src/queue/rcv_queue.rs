@@ -16,7 +16,7 @@ use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
 
 const TIMERS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
-const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(20);
+const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(10);
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
