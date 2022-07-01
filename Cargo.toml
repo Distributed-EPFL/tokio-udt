@@ -3,6 +3,9 @@ name = "tokio-udt"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
+description = """
+An implementation of UDP-based Data Transfer Protocol (UDT) based on Tokio primitives
+"""
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
