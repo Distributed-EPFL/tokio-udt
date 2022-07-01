@@ -3,11 +3,12 @@ use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtSocket, UdtStatus};
 use crate::udt::{SocketRef, Udt};
 use nix::sys::socket::{
-    recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrLike, SockaddrStorage,
+    recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrIn, SockaddrIn6, SockaddrLike,
+    SockaddrStorage,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::io::IoSliceMut;
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::io::{Error, ErrorKind, Interest, Result};
@@ -118,10 +119,12 @@ impl UdtRcvQueue {
                             let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
                             let addr: SocketAddr = match addr.family() {
                                 Some(AddressFamily::Inet) => {
-                                    SocketAddrV4::from(*addr.as_sockaddr_in().unwrap()).into()
+                                    Self::addr_v4_from_sockaddrin(*addr.as_sockaddr_in().unwrap())
+                                        .into()
                                 }
                                 Some(AddressFamily::Inet6) => {
-                                    SocketAddrV6::from(*addr.as_sockaddr_in6().unwrap()).into()
+                                    Self::addr_v6_from_sockaddrin6(*addr.as_sockaddr_in6().unwrap())
+                                        .into()
                                 }
                                 _ => unreachable!(),
                             };
@@ -197,5 +200,19 @@ impl UdtRcvQueue {
                 }
             }
         }
+    }
+
+    // TEMP: waiting for "nix" next release (> 0.24.1) to include these conversions
+    fn addr_v4_from_sockaddrin(addr: SockaddrIn) -> std::net::SocketAddrV4 {
+        std::net::SocketAddrV4::new(std::net::Ipv4Addr::from(addr.ip()), addr.port())
+    }
+
+    fn addr_v6_from_sockaddrin6(addr: SockaddrIn6) -> std::net::SocketAddrV6 {
+        std::net::SocketAddrV6::new(
+            addr.ip(),
+            addr.port(),
+            u32::from_be(addr.flowinfo()),
+            u32::from_be(addr.scope_id()),
+        )
     }
 }

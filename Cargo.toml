@@ -12,5 +12,5 @@ sha2 = "*"
 once_cell = "*"
 tokio-timerfd = "*"
 socket2 = "*"
-nix = { git = "https://github.com/nix-rust/nix", rev = "01a5927" }
+nix = "0.24.1"
 bytes = "*"

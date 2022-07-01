@@ -31,8 +31,14 @@ async fn main() {
         if last.elapsed() > Duration::new(1, 0) {
             last = Instant::now();
             println!("Sent {} messages", count);
-            println!("Period {:?}", connection.rate_control().get_pkt_send_period());
-            println!("Window {:?}", connection.rate_control().get_congestion_window_size());
+            println!(
+                "Period {:?}",
+                connection.rate_control().get_pkt_send_period()
+            );
+            println!(
+                "Window {:?}",
+                connection.rate_control().get_congestion_window_size()
+            );
         }
     }
 }
