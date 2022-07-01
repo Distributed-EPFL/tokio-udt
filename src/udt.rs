@@ -212,4 +212,8 @@ impl Udt {
         UdtMultiplexer::run(mux);
         Ok(())
     }
+
+    pub fn remove_socket(&mut self, socket_id: SocketId) {
+        self.sockets.remove(&socket_id);
+    }
 }

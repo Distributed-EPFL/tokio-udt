@@ -44,6 +44,10 @@ impl UdtConnection {
     ) -> std::sync::RwLockWriteGuard<'_, crate::rate_control::RateControl> {
         self.socket.rate_control.write().unwrap()
     }
+
+    pub async fn close(&self) {
+        self.socket.close().await
+    }
 }
 
 impl AsyncRead for UdtConnection {
@@ -102,12 +106,16 @@ impl AsyncWrite for UdtConnection {
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
-        // TODO: Best effort shutdown
-        // match self.socket.close() {
-        //     Ok(_) => Poll::Ready(Ok(())),
-        //     Err(e) => Poll::Ready(Err(Error::new(ErrorKind::Other, e.err_msg))),
-        // }
-        Poll::Ready(Ok(()))
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+        if self.socket.status() == UdtStatus::Closed {
+            return Poll::Ready(Ok(()));
+        }
+        let socket = self.socket.clone();
+        let waker = cx.waker().clone();
+        tokio::spawn(async move {
+            socket.close().await;
+            waker.wake();
+        });
+        Poll::Pending
     }
 }

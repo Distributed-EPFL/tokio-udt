@@ -18,7 +18,7 @@ pub struct UdtConfiguration {
     // ip_version
     pub rendezvous: bool,
     pub accept_queue_size: usize,
-    linger_timeout: Option<u32>,
+    pub linger_timeout: Option<u32>,
 }
 
 impl UdtConfiguration {

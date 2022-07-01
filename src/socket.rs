@@ -239,10 +239,8 @@ impl UdtSocket {
 
     pub(crate) async fn next_data_packets(&self) -> Result<Option<(Vec<UdtDataPacket>, Instant)>> {
         if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status()) {
-            return Err(Error::new(
-                ErrorKind::BrokenPipe,
-                "socket is closed or broken",
-            ));
+            eprintln!("No data to send: socket {} has status {:?}", self.socket_id, self.status());
+            return Ok(None);
         }
         let now = Instant::now();
         let mut probe = false;
@@ -938,6 +936,12 @@ impl UdtSocket {
                     // Connection is broken
                     *self.status.lock().unwrap() = UdtStatus::Broken;
                     self.update_snd_queue(true);
+                    let socket_id = self.socket_id;
+                    tokio::spawn(async move {
+                        if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
+                            socket.close().await;
+                        };
+                    });
                     return;
                 }
             }
@@ -1147,6 +1151,56 @@ impl UdtSocket {
 
     pub fn snd_buffer_is_empty(&self) -> bool {
         self.snd_buffer.lock().unwrap().is_empty()
+    }
+
+    pub async fn close(&self) {
+        let status = self.status();
+        if status == UdtStatus::Closed
+            || status == UdtStatus::Closing
+        {
+            *self.status.lock().unwrap() = UdtStatus::Closed;
+            return;
+        }
+        let now = Instant::now();
+        let linger_timeout = Duration::from_secs(
+            self.configuration
+                .read()
+                .unwrap()
+                .linger_timeout
+                .unwrap_or(0)
+                .into(),
+        );
+
+        while self.status() == UdtStatus::Connected
+            && !self.snd_buffer_is_empty()
+            && now.elapsed() < linger_timeout
+        {
+            self.ack_notify.notified().await;
+        }
+
+        if let Some(mux) = self.multiplexer() {
+            mux.snd_queue.remove(self.socket_id);
+            let listener_id = mux.listener.read().await.clone().map(|s| s.socket_id);
+            if listener_id == Some(self.socket_id) {
+                *mux.listener.write().await = None;
+            }
+        }
+
+        // TODO: remove socket from rendez-vous queue
+
+        if self.status() == UdtStatus::Connected {
+            let shutdown = UdtControlPacket::new_shutdown(self.peer_socket_id().unwrap());
+            self.send_packet(shutdown.into())
+                .await
+                .unwrap_or_else(|err| {
+                    eprintln!("Failed to send shutdown packet: {}", err);
+                });
+        }
+
+        // TODO: keep channel stats in cache
+        *self.status.lock().unwrap() = UdtStatus::Closing;
+        Udt::get().write().await.remove_socket(self.socket_id);
+        *self.status.lock().unwrap() = UdtStatus::Closed;
     }
 }
 

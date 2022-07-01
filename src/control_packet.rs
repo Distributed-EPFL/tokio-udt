@@ -75,6 +75,16 @@ impl UdtControlPacket {
         }
     }
 
+    pub fn new_shutdown(dest_socket_id: SocketId) -> Self {
+        Self {
+            packet_type: ControlPacketType::Shutdown,
+            dest_socket_id,
+            additional_info: 0,
+            reserved: 0,
+            timestamp: 0,
+        }
+    }
+
     pub fn new_ack(
         ack_number: AckSeqNumber,
         next_seq_number: SeqNumber,
