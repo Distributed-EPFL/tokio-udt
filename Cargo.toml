@@ -6,6 +6,8 @@ license = "AGPL-3.0"
 description = """
 An implementation of UDP-based Data Transfer Protocol (UDT) based on Tokio primitives
 """
+repository = "https://github.com/amatissart/tokio-udt"
+keywords = ["udt", "udt4", "networking", "transport", "protocol"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
