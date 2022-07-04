@@ -8,6 +8,8 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_timerfd::Delay;
 
+const TOKIO_CHANNEL_CAPACITY: usize = 50;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct SendQueueNode {
     timestamp: Instant,
@@ -61,7 +63,7 @@ impl UdtSndQueue {
     }
 
     pub async fn worker(&self) -> Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(20);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(TOKIO_CHANNEL_CAPACITY);
 
         tokio::spawn(async move {
             while let Some((socket, packets)) = rx.recv().await {
