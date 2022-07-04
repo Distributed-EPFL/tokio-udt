@@ -2,6 +2,7 @@ use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtSocket, UdtStatus};
 use crate::udt::{SocketRef, Udt};
+use itertools::Itertools;
 use nix::sys::socket::{
     recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrIn, SockaddrIn6, SockaddrLike,
     SockaddrStorage,
@@ -76,6 +77,18 @@ impl UdtRcvQueue {
     pub(crate) async fn worker(&self) -> Result<()> {
         let mut buf = vec![0_u8; self.mss as usize * 100];
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            while let Some((socket, packets)) = rx.recv().await {
+                let socket: SocketRef = socket;
+                for packet in packets {
+                    socket.process_packet(packet).await.unwrap();
+                }
+                socket.check_timers().await;
+            }
+        });
+
         loop {
             let packets = {
                 let bufs = buf.chunks_exact_mut(self.mss as usize);
@@ -142,25 +155,35 @@ impl UdtRcvQueue {
                 }
             };
 
-            for (packet, addr) in packets.into_iter().flatten() {
-                let socket_id = packet.get_dest_socket_id();
+            let groups: Vec<_> = packets
+                .into_iter()
+                .flatten()
+                .group_by(|(packet, addr)| (*addr, packet.get_dest_socket_id()))
+                .into_iter()
+                .map(|(k, group)| (k, group.map(|(packet, _addr)| packet).collect::<Vec<_>>()))
+                .collect();
+
+            for ((addr, socket_id), group) in groups {
+                // let socket_id = packet.get_dest_socket_id();
                 if socket_id == 0 {
-                    if let Some(handshake) = packet.handshake() {
-                        let mux = {
-                            let lock = self.multiplexer.lock().unwrap();
-                            lock.upgrade()
-                        };
-                        if let Some(mux) = mux {
-                            let listener = mux.listener.read().await;
-                            if let Some(listener) = &*listener {
-                                listener.listen_on_handshake(addr, handshake).await?;
+                    for packet in group {
+                        if let Some(handshake) = packet.handshake() {
+                            let mux = {
+                                let lock = self.multiplexer.lock().unwrap();
+                                lock.upgrade()
+                            };
+                            if let Some(mux) = mux {
+                                let listener = mux.listener.read().await;
+                                if let Some(listener) = &*listener {
+                                    listener.listen_on_handshake(addr, handshake).await?;
+                                }
                             }
+                        } else {
+                            return Err(Error::new(
+                                ErrorKind::InvalidData,
+                                "received non-hanshake packet with socket 0",
+                            ));
                         }
-                    } else {
-                        return Err(Error::new(
-                            ErrorKind::InvalidData,
-                            "received non-hanshake packet with socket 0",
-                        ));
                     }
                 } else {
                     // if !self.sockets.contains(&socket_id) {
@@ -173,11 +196,12 @@ impl UdtRcvQueue {
                             && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
                                 .contains(&socket.status())
                         {
-                            socket.process_packet(packet).await?;
-                            socket.check_timers().await;
+                            // socket.process_packet(packet).await?;
+                            // socket.check_timers().await;
+                            tx.send((socket, group)).await.unwrap();
                             self.update(socket_id);
                         } else {
-                            eprintln!("Ignoring packet {:?}", packet);
+                            eprintln!("Ignoring {} packets", group.len());
                         }
                     } else {
                         eprintln!("socket not found for socket_id {}", socket_id);
