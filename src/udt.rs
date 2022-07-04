@@ -10,6 +10,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_timerfd::sleep;
 
 pub(crate) type SocketRef = Arc<UdtSocket>;
 
@@ -33,7 +34,10 @@ impl Udt {
     }
 
     pub fn get() -> &'static RwLock<Self> {
-        UDT_INSTANCE.get_or_init(|| RwLock::new(Udt::new()))
+        UDT_INSTANCE.get_or_init(|| {
+            Udt::cleanup_worker();
+            RwLock::new(Udt::new())
+        })
     }
 
     fn get_new_socket_id(&mut self) -> SocketId {
@@ -98,8 +102,10 @@ impl Udt {
         {
             let socket = existing_peer_socket;
             if socket.status() == UdtStatus::Broken {
+                eprintln!("Existing connection to peer {} is broken", peer);
                 // last connection from the "peer" address has been broken
-                *socket.status.lock().unwrap() = UdtStatus::Closed;
+
+                // *socket.status.lock().unwrap() = UdtStatus::Closed;
                 /*  TODO:
                     Set timestamp? and remove from queued sockets and accept sockets?
                 */
@@ -213,7 +219,44 @@ impl Udt {
         Ok(())
     }
 
-    pub fn remove_socket(&mut self, socket_id: SocketId) {
-        self.sockets.remove(&socket_id);
+    async fn remove_broken_sockets(&mut self) {
+        for (_, sock) in self
+            .sockets
+            .iter()
+            .filter(|(_, s)| s.status() == UdtStatus::Broken)
+        {
+            sock.close().await;
+            if let Some(listen_socket_id) = sock.listen_socket {
+                if let Some(listener) = self.sockets.get(&listen_socket_id) {
+                    listener
+                        .queued_sockets
+                        .write()
+                        .await
+                        .remove(&sock.socket_id);
+                }
+            }
+        }
+
+        let to_remove: Vec<_> = self
+            .sockets
+            .iter()
+            .filter(|(_, s)| s.status() == UdtStatus::Closing)
+            .map(|(socket_id, _)| *socket_id)
+            .collect();
+        for socket_id in to_remove {
+            if let Some(sock) = self.sockets.remove(&socket_id) {
+                *sock.status.lock().unwrap() = UdtStatus::Closed;
+            }
+        }
+    }
+
+    fn cleanup_worker() {
+        tokio::spawn(async {
+            loop {
+                let udt = Self::get();
+                udt.write().await.remove_broken_sockets().await;
+                sleep(std::time::Duration::from_secs(1)).await.unwrap();
+            }
+        });
     }
 }

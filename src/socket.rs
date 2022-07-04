@@ -63,7 +63,7 @@ pub struct UdtSocket {
     pub socket_id: SocketId,
     pub status: Mutex<UdtStatus>,
     pub socket_type: SocketType,
-    listen_socket: Option<SocketId>,
+    pub(crate) listen_socket: Option<SocketId>,
     peer_addr: Mutex<Option<SocketAddr>>,
     peer_socket_id: Mutex<Option<SocketId>>,
     pub initial_seq_number: SeqNumber,
@@ -239,7 +239,11 @@ impl UdtSocket {
 
     pub(crate) async fn next_data_packets(&self) -> Result<Option<(Vec<UdtDataPacket>, Instant)>> {
         if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status()) {
-            eprintln!("No data to send: socket {} has status {:?}", self.socket_id, self.status());
+            eprintln!(
+                "No data to send: socket {} has status {:?}",
+                self.socket_id,
+                self.status()
+            );
             return Ok(None);
         }
         let now = Instant::now();
@@ -1155,9 +1159,7 @@ impl UdtSocket {
 
     pub async fn close(&self) {
         let status = self.status();
-        if status == UdtStatus::Closed
-            || status == UdtStatus::Closing
-        {
+        if status == UdtStatus::Closed || status == UdtStatus::Closing {
             *self.status.lock().unwrap() = UdtStatus::Closed;
             return;
         }
@@ -1199,8 +1201,6 @@ impl UdtSocket {
 
         // TODO: keep channel stats in cache
         *self.status.lock().unwrap() = UdtStatus::Closing;
-        Udt::get().write().await.remove_socket(self.socket_id);
-        *self.status.lock().unwrap() = UdtStatus::Closed;
     }
 }
 

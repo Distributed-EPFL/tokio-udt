@@ -17,7 +17,7 @@ use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
 
 const TIMERS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
-const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(10);
+const UDP_RCV_TIMEOUT: Duration = Duration::from_micros(30);
 
 #[derive(Debug)]
 pub(crate) struct UdtRcvQueue {
@@ -113,7 +113,8 @@ impl UdtRcvQueue {
                     .unwrap_or_default();
 
                 if !msgs.is_empty() {
-                    msgs.into_iter()
+                    let packets: Vec<_> = msgs
+                        .into_iter()
                         .zip(buf.chunks_exact_mut(self.mss as usize))
                         .filter_map(|((nbytes, addr), buf)| {
                             let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
@@ -130,18 +131,18 @@ impl UdtRcvQueue {
                             };
                             Some((packet, addr))
                         })
-                        .collect()
+                        .collect();
+                    Some(packets)
                 } else {
                     tokio::select! {
                         _ = sleep(UDP_RCV_TIMEOUT) => (),
                         _ = self.channel.readable() => ()
-
                     };
-                    vec![]
+                    None
                 }
             };
 
-            for (packet, addr) in packets {
+            for (packet, addr) in packets.into_iter().flatten() {
                 let socket_id = packet.get_dest_socket_id();
                 if socket_id == 0 {
                     if let Some(handshake) = packet.handshake() {
@@ -196,7 +197,11 @@ impl UdtRcvQueue {
 
             for socket_id in to_check {
                 if let Some(socket) = self.get_socket(socket_id).await {
-                    socket.check_timers().await;
+                    let status = socket.status();
+                    if ![UdtStatus::Broken, UdtStatus::Closing, UdtStatus::Closed].contains(&status)
+                    {
+                        socket.check_timers().await;
+                    }
                 }
             }
         }

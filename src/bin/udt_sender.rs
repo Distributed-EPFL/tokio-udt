@@ -41,4 +41,6 @@ async fn main() {
             );
         }
     }
+
+    // connection.close().await
 }
