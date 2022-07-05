@@ -90,4 +90,8 @@ impl UdtListener {
 
         Ok((peer_addr, UdtConnection::new(accepted_socket)))
     }
+
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        self.socket.multiplexer().unwrap().channel.local_addr()
+    }
 }

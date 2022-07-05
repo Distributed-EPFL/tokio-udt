@@ -83,8 +83,8 @@ impl UdtMultiplexer {
         bind_addr: SocketAddr,
         config: &UdtConfiguration,
     ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
-        let port = bind_addr.port();
         let udp_socket = Self::new_udp_socket(config, Some(bind_addr)).await?;
+        let port = udp_socket.local_addr()?.port();
         let channel = Arc::new(udp_socket);
         let mux = Self {
             id,
