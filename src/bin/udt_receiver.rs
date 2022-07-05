@@ -23,8 +23,16 @@ async fn main() {
             let mut last = Instant::now();
             async move {
                 loop {
-                    let size = connection.read_buf(&mut buffer).await.unwrap();
-                    bytes += size;
+                    match connection.read_buf(&mut buffer).await {
+                        Ok(size) => {
+                            bytes += size;
+                        }
+                        Err(_err) => {
+                            eprintln!("Connnection with {} closed", addr);
+                            println!("Received {} MB", bytes as f64 / 1e6);
+                            break;
+                        }
+                    }
 
                     if last.elapsed() > Duration::new(1, 0) {
                         last = Instant::now();

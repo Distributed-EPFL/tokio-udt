@@ -660,6 +660,7 @@ impl UdtSocket {
             }
             ControlPacketType::Shutdown => {
                 *self.status.lock().unwrap() = UdtStatus::Closing;
+                self.notify_all();
             }
             ControlPacketType::MsgDropRequest(ref drop) => {
                 let msg_number = packet.msg_seq_number().unwrap();
@@ -940,12 +941,6 @@ impl UdtSocket {
                     // Connection is broken
                     *self.status.lock().unwrap() = UdtStatus::Broken;
                     self.update_snd_queue(true);
-                    let socket_id = self.socket_id;
-                    tokio::spawn(async move {
-                        if let Some(socket) = Udt::get().read().await.get_socket(socket_id) {
-                            socket.close().await;
-                        };
-                    });
                     return;
                 }
             }
@@ -1082,7 +1077,10 @@ impl UdtSocket {
             )));
         }
         let status = self.status();
-        if status == UdtStatus::Broken || status == UdtStatus::Closing {
+        if status == UdtStatus::Broken
+            || status == UdtStatus::Closing
+            || status == UdtStatus::Closed
+        {
             if !self.rcv_buffer().has_data_to_read() {
                 return Poll::Ready(Err(Error::new(
                     ErrorKind::BrokenPipe,
@@ -1160,7 +1158,6 @@ impl UdtSocket {
     pub async fn close(&self) {
         let status = self.status();
         if status == UdtStatus::Closed || status == UdtStatus::Closing {
-            *self.status.lock().unwrap() = UdtStatus::Closed;
             return;
         }
         let now = Instant::now();
@@ -1201,6 +1198,13 @@ impl UdtSocket {
 
         // TODO: keep channel stats in cache
         *self.status.lock().unwrap() = UdtStatus::Closing;
+        self.notify_all();
+    }
+
+    fn notify_all(&self) {
+        self.accept_notify.notify_waiters();
+        self.rcv_notify.notify_waiters();
+        self.connect_notify.notify_waiters();
     }
 }
 

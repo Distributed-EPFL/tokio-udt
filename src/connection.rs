@@ -4,7 +4,7 @@ use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ErrorKind, ReadBuf, Result};
+use tokio::io::{AsyncRead, AsyncWrite, Error, ErrorKind, ReadBuf, Result};
 
 pub struct UdtConnection {
     socket: SocketRef,
@@ -22,7 +22,17 @@ impl UdtConnection {
         };
         socket.connect(addr).await?;
         loop {
-            if socket.status() == UdtStatus::Connected {
+            let status = socket.status();
+            if status == UdtStatus::Closing
+                || status == UdtStatus::Broken
+                || status == UdtStatus::Closed
+            {
+                return Err(Error::new(
+                    ErrorKind::BrokenPipe,
+                    format!("socket status is {:?}", status),
+                ));
+            }
+            if status == UdtStatus::Connected {
                 break;
             }
             socket.connect_notify.notified().await;
@@ -57,7 +67,7 @@ impl AsyncRead for UdtConnection {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<()>> {
         match self.socket.poll_recv(buf) {
-            Poll::Ready(_) => Poll::Ready(Ok(())),
+            Poll::Ready(res) => Poll::Ready(res.map(|_| ())),
             Poll::Pending => {
                 let waker = cx.waker().clone();
                 let socket = self.socket.clone();
