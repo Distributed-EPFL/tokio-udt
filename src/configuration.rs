@@ -1,5 +1,5 @@
 const DEFAULT_MSS: u32 = 1500;
-const DEFAULT_UDT_BUF_SIZE: u32 = 8192;
+const DEFAULT_UDT_BUF_SIZE: u32 = 81920;
 const DEFAULT_UDP_BUF_SIZE: usize = 8_000_000;
 const UDT_VERSION: u32 = 4;
 
@@ -31,7 +31,7 @@ impl Default for UdtConfiguration {
     fn default() -> Self {
         Self {
             mss: DEFAULT_MSS,
-            flight_flag_size: 25600,
+            flight_flag_size: 256000,
             snd_buf_size: DEFAULT_UDT_BUF_SIZE,
             rcv_buf_size: DEFAULT_UDT_BUF_SIZE * 2,
             udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
