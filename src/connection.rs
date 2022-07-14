@@ -84,7 +84,6 @@ impl AsyncRead for UdtConnection {
 impl AsyncWrite for UdtConnection {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize>> {
         let buf_len = buf.len();
-        eprintln!("UDT writing {} bytes", buf_len);
         match self.socket.send(buf) {
             Ok(_) => Poll::Ready(Ok(buf_len)),
             Err(err) => match err.kind() {

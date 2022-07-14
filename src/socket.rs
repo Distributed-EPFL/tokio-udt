@@ -719,7 +719,6 @@ impl UdtSocket {
 
             let payload_len = packet.payload_len();
             rcv_buffer.insert(packet);
-            eprintln!("Processed data packet. Payload len: {}", payload_len);
             payload_len
         };
 
