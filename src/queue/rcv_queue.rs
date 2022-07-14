@@ -181,6 +181,7 @@ impl UdtRcvQueue {
                         }
                     } else {
                         eprintln!("socket not found for socket_id {}", socket_id);
+                        eprintln!("packet: {:?}", packet);
                         // TODO: implement rendezvous queue
                     }
                 }
