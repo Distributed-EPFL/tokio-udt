@@ -1044,9 +1044,7 @@ impl UdtSocket {
             return Ok(0);
         }
 
-        if !self.rcv_buffer().has_data_to_read() {
-            self.rcv_notify.notified().await;
-        }
+        self.wait_for_data_to_read().await;
 
         let status = self.status();
         if status == UdtStatus::Broken || status == UdtStatus::Closing {
@@ -1206,6 +1204,19 @@ impl UdtSocket {
         self.accept_notify.notify_waiters();
         self.rcv_notify.notify_waiters();
         self.connect_notify.notify_waiters();
+    }
+
+    pub(crate) async fn wait_for_data_to_read(&self) {
+        if let Some(notified) = {
+            let rcv_buffer = self.rcv_buffer();
+            if rcv_buffer.has_data_to_read() {
+                None
+            } else {
+                Some(self.rcv_notify.notified())
+            }
+        } {
+            notified.await
+        }
     }
 }
 

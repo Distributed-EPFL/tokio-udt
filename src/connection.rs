@@ -72,7 +72,7 @@ impl AsyncRead for UdtConnection {
                 let waker = cx.waker().clone();
                 let socket = self.socket.clone();
                 tokio::spawn(async move {
-                    socket.rcv_notify.notified().await;
+                    socket.wait_for_data_to_read().await;
                     waker.wake();
                 });
                 Poll::Pending
