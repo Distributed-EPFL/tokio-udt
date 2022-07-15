@@ -22,20 +22,16 @@ impl UdtConnection {
         };
         socket.connect(addr).await?;
         loop {
-            let status = socket.status();
-            if status == UdtStatus::Closing
-                || status == UdtStatus::Broken
-                || status == UdtStatus::Closed
-            {
+            let status = socket.wait_for_connection().await;
+            if status == UdtStatus::Connected {
+                break;
+            }
+            if status != UdtStatus::Connecting {
                 return Err(Error::new(
                     ErrorKind::BrokenPipe,
                     format!("socket status is {:?}", status),
                 ));
             }
-            if status == UdtStatus::Connected {
-                break;
-            }
-            socket.connect_notify.notified().await;
         }
         Ok(Self::new(socket))
     }
@@ -91,7 +87,7 @@ impl AsyncWrite for UdtConnection {
                     let waker = cx.waker().clone();
                     let socket = self.socket.clone();
                     tokio::spawn(async move {
-                        socket.ack_notify.notified().await;
+                        socket.wait_for_next_ack_or_empty_snd_buffer().await;
                         waker.wake();
                     });
                     Poll::Pending
@@ -108,7 +104,7 @@ impl AsyncWrite for UdtConnection {
                 let waker = cx.waker().clone();
                 let socket = self.socket.clone();
                 tokio::spawn(async move {
-                    socket.ack_notify.notified().await;
+                    socket.wait_for_next_ack_or_empty_snd_buffer().await;
                     waker.wake();
                 });
                 Poll::Pending

@@ -82,9 +82,9 @@ pub struct UdtSocket {
 
     state: Mutex<SocketState>,
 
-    pub(crate) connect_notify: Notify,
-    pub(crate) rcv_notify: Notify,
-    pub(crate) ack_notify: Notify,
+    connect_notify: Notify,
+    rcv_notify: Notify,
+    ack_notify: Notify,
 }
 
 impl UdtSocket {
@@ -1172,7 +1172,7 @@ impl UdtSocket {
             && !self.snd_buffer_is_empty()
             && now.elapsed() < linger_timeout
         {
-            self.ack_notify.notified().await;
+            self.wait_for_next_ack_or_empty_snd_buffer().await;
         }
 
         if let Some(mux) = self.multiplexer() {
@@ -1212,6 +1212,33 @@ impl UdtSocket {
                 None
             } else {
                 Some(self.rcv_notify.notified())
+            }
+        } {
+            notified.await
+        }
+    }
+
+    pub(crate) async fn wait_for_connection(&self) -> UdtStatus {
+        if let Some(notified) = {
+            let status = self.status.lock().unwrap();
+            if *status != UdtStatus::Connecting {
+                None
+            } else {
+                Some(self.connect_notify.notified())
+            }
+        } {
+            notified.await
+        }
+        self.status()
+    }
+
+    pub(crate) async fn wait_for_next_ack_or_empty_snd_buffer(&self) {
+        if let Some(notified) = {
+            let snd_buffer = self.snd_buffer.lock().unwrap();
+            if snd_buffer.is_empty() {
+                None
+            } else {
+                Some(self.ack_notify.notified())
             }
         } {
             notified.await
