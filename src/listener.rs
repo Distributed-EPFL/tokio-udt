@@ -55,7 +55,7 @@ impl UdtListener {
         }
 
         let accepted_socket_id = loop {
-            {
+            let notified = {
                 if self.socket.status() != UdtStatus::Listening {
                     return Err(Error::new(
                         ErrorKind::Other,
@@ -69,8 +69,9 @@ impl UdtListener {
                     queue.remove(&socket_id);
                     break socket_id;
                 }
-            }
-            self.socket.accept_notify.notified().await;
+                self.socket.accept_notify.notified()
+            };
+            notified.await
         };
 
         let udt = Udt::get().read().await;
