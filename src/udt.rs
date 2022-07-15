@@ -225,7 +225,6 @@ impl Udt {
             .iter()
             .filter(|(_, s)| s.status() == UdtStatus::Broken)
         {
-            sock.close().await;
             if let Some(listen_socket_id) = sock.listen_socket {
                 if let Some(listener) = self.sockets.get(&listen_socket_id) {
                     listener
@@ -235,6 +234,12 @@ impl Udt {
                         .remove(&sock.socket_id);
                 }
             }
+            tokio::spawn({
+                let sock = sock.clone();
+                async move {
+                    sock.close().await
+                }
+            });
         }
 
         let to_remove: Vec<_> = self
