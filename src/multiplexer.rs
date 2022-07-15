@@ -62,6 +62,10 @@ impl UdtMultiplexer {
         let udp_socket = Self::new_udp_socket(config, None).await?;
         let channel = Arc::new(udp_socket);
         let port = channel.local_addr()?.port();
+
+        eprintln!("New:");
+        dbg!(port);
+
         let mux = Self {
             id,
             port,
@@ -85,6 +89,11 @@ impl UdtMultiplexer {
     ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
         let udp_socket = Self::new_udp_socket(config, Some(bind_addr)).await?;
         let port = udp_socket.local_addr()?.port();
+
+        eprintln!("Bind:");
+        dbg!(bind_addr);
+        dbg!(port);
+
         let channel = Arc::new(udp_socket);
         let mux = Self {
             id,
