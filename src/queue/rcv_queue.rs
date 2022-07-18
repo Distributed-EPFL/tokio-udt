@@ -192,13 +192,6 @@ impl UdtRcvQueue {
                 }
             }
 
-            eprintln!(
-                "Mux {}, port {}, {} sockets",
-                mux_id,
-                mux_port,
-                self.sockets.lock().unwrap().len()
-            );
-
             let to_check: Vec<_> = self
                 .sockets
                 .lock()
