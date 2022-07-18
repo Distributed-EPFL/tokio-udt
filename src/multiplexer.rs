@@ -6,7 +6,7 @@ use nix::sys::socket::{sendmmsg, MsgFlags, SendMmsgData, SockaddrStorage};
 use socket2::{Domain, Socket, Type};
 use std::io::IoSlice;
 use std::io::Result;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use tokio::io::{Error, ErrorKind, Interest};
@@ -33,7 +33,8 @@ impl UdtMultiplexer {
         config: &UdtConfiguration,
         bind_addr: Option<SocketAddr>,
     ) -> Result<UdpSocket> {
-        let domain = if bind_addr.map(|addr| addr.ip().is_ipv6()).unwrap_or(false) {
+        let bind_addr = bind_addr.unwrap_or_else(|| (Ipv4Addr::LOCALHOST, 0).into());
+        let domain = if bind_addr.is_ipv6() {
             Domain::IPV6
         } else {
             Domain::IPV4
@@ -46,9 +47,7 @@ impl UdtMultiplexer {
                 socket.set_send_buffer_size(config.udp_snd_buf_size)?;
                 socket.set_reuse_port(true)?;
                 socket.set_nonblocking(true)?;
-                if let Some(addr) = bind_addr {
-                    socket.bind(&addr.into())?;
-                }
+                socket.bind(&bind_addr.into())?;
                 UdpSocket::from_std(socket.into())
             }
         })
