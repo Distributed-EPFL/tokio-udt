@@ -76,6 +76,11 @@ impl UdtRcvQueue {
     pub(crate) async fn worker(&self) -> Result<()> {
         let mut buf = vec![0_u8; self.mss as usize * 100];
 
+        let (mux_id, mux_port) = {
+            let mux = self.multiplexer.lock().unwrap().upgrade().unwrap();
+            (mux.id, mux.port)
+        };
+
         loop {
             let packets = {
                 let bufs = buf.chunks_exact_mut(self.mss as usize);
@@ -187,6 +192,13 @@ impl UdtRcvQueue {
                 }
             }
 
+            eprintln!(
+                "Mux {}, port {}, {} sockets",
+                mux_id,
+                mux_port,
+                self.sockets.lock().unwrap().len()
+            );
+
             let to_check: Vec<_> = self
                 .sockets
                 .lock()
@@ -196,6 +208,13 @@ impl UdtRcvQueue {
                 .map(|(_, socket_id)| *socket_id)
                 .collect();
 
+            eprintln!(
+                "Mux {}, port {}, {} sockets to check",
+                mux_id,
+                mux_port,
+                to_check.len()
+            );
+
             for socket_id in to_check {
                 if let Some(socket) = self.get_socket(socket_id).await {
                     let status = socket.status();
@@ -203,8 +222,13 @@ impl UdtRcvQueue {
                     {
                         socket.check_timers().await;
                     }
+                    else {
+                        eprintln!("check_timers: ignoring socket {}", socket.socket_id);
+                    }
                 }
             }
+
+            eprintln!("Mux {}, port {}, OK", mux_id, mux_port);
         }
     }
 

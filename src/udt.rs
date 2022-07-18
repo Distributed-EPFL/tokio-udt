@@ -236,9 +236,7 @@ impl Udt {
             }
             tokio::spawn({
                 let sock = sock.clone();
-                async move {
-                    sock.close().await
-                }
+                async move { sock.close().await }
             });
         }
 
@@ -257,8 +255,8 @@ impl Udt {
 
     fn cleanup_worker() {
         tokio::spawn(async {
+            let udt = Self::get();
             loop {
-                let udt = Self::get();
                 udt.write().await.remove_broken_sockets().await;
                 sleep(std::time::Duration::from_secs(1)).await.unwrap();
             }
