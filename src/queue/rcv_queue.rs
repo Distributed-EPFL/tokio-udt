@@ -208,13 +208,6 @@ impl UdtRcvQueue {
                 .map(|(_, socket_id)| *socket_id)
                 .collect();
 
-            eprintln!(
-                "Mux {}, port {}, {} sockets to check",
-                mux_id,
-                mux_port,
-                to_check.len()
-            );
-
             for socket_id in to_check {
                 if let Some(socket) = self.get_socket(socket_id).await {
                     let status = socket.status();
@@ -226,8 +219,6 @@ impl UdtRcvQueue {
                     }
                 }
             }
-
-            eprintln!("Mux {}, port {}, OK", mux_id, mux_port);
         }
     }
 

@@ -11,6 +11,7 @@ pub struct UdtConfiguration {
     pub rcv_buf_size: u32,
     pub udp_snd_buf_size: usize,
     pub udp_rcv_buf_size: usize,
+    pub udp_reuse_port: bool,
     pub reuse_mux: bool,
     // snd_timeout
     // rcv_timeout
@@ -36,6 +37,7 @@ impl Default for UdtConfiguration {
             rcv_buf_size: DEFAULT_UDT_BUF_SIZE * 2,
             udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_rcv_buf_size: DEFAULT_UDP_BUF_SIZE,
+            udp_reuse_port: false,
             linger_timeout: Some(180),
             reuse_mux: true,
             rendezvous: false,

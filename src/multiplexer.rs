@@ -33,7 +33,7 @@ impl UdtMultiplexer {
         config: &UdtConfiguration,
         bind_addr: Option<SocketAddr>,
     ) -> Result<UdpSocket> {
-        let bind_addr = bind_addr.unwrap_or_else(|| (Ipv4Addr::LOCALHOST, 0).into());
+        let bind_addr = bind_addr.unwrap_or_else(|| (Ipv4Addr::UNSPECIFIED, 0).into());
         let domain = if bind_addr.is_ipv6() {
             Domain::IPV6
         } else {
@@ -45,7 +45,7 @@ impl UdtMultiplexer {
                 let socket = Socket::new(domain, Type::DGRAM, None)?;
                 socket.set_recv_buffer_size(config.udp_rcv_buf_size)?;
                 socket.set_send_buffer_size(config.udp_snd_buf_size)?;
-                socket.set_reuse_port(true)?;
+                socket.set_reuse_port(config.udp_reuse_port)?;
                 socket.set_nonblocking(true)?;
                 socket.bind(&bind_addr.into())?;
                 UdpSocket::from_std(socket.into())
@@ -61,9 +61,6 @@ impl UdtMultiplexer {
         let udp_socket = Self::new_udp_socket(config, None).await?;
         let channel = Arc::new(udp_socket);
         let port = channel.local_addr()?.port();
-
-        eprintln!("New:");
-        dbg!(port);
 
         let mux = Self {
             id,
@@ -88,10 +85,6 @@ impl UdtMultiplexer {
     ) -> Result<(MultiplexerId, Arc<UdtMultiplexer>)> {
         let udp_socket = Self::new_udp_socket(config, Some(bind_addr)).await?;
         let port = udp_socket.local_addr()?.port();
-
-        eprintln!("Bind:");
-        dbg!(bind_addr);
-        dbg!(port);
 
         let channel = Arc::new(udp_socket);
         let mux = Self {
