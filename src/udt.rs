@@ -193,11 +193,13 @@ impl Udt {
         if socket.configuration.read().unwrap().reuse_mux {
             if let Some(bind_addr) = bind_addr {
                 let port = bind_addr.port();
-                for mux in self.multiplexers.values() {
-                    let socket_mss = socket.configuration.read().unwrap().mss;
-                    if mux.reusable && mux.port == port && mux.mss == socket_mss {
-                        socket.set_multiplexer(mux);
-                        return Ok(());
+                if port > 0 {
+                    for mux in self.multiplexers.values() {
+                        let socket_mss = socket.configuration.read().unwrap().mss;
+                        if mux.reusable && mux.port == port && mux.mss == socket_mss {
+                            socket.set_multiplexer(mux);
+                            return Ok(());
+                        }
                     }
                 }
             }
