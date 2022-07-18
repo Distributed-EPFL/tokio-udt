@@ -221,8 +221,7 @@ impl UdtRcvQueue {
                     if ![UdtStatus::Broken, UdtStatus::Closing, UdtStatus::Closed].contains(&status)
                     {
                         socket.check_timers().await;
-                    }
-                    else {
+                    } else {
                         eprintln!("check_timers: ignoring socket {}", socket.socket_id);
                     }
                 }
