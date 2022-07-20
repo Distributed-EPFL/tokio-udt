@@ -3,7 +3,7 @@ use crate::control_packet::{HandShakeInfo, UdtControlPacket};
 use crate::multiplexer::{MultiplexerId, UdtMultiplexer};
 use crate::seq_number::SeqNumber;
 use crate::socket::{SocketId, SocketType, UdtSocket, UdtStatus};
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Error, ErrorKind, Result};
@@ -14,7 +14,9 @@ use tokio_timerfd::sleep;
 
 pub(crate) type SocketRef = Arc<UdtSocket>;
 
-pub(crate) static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
+static UDT_INSTANCE: OnceCell<RwLock<Udt>> = OnceCell::new();
+pub(crate) static UDT_DEBUG: Lazy<bool> =
+    Lazy::new(|| std::env::var("UDT_DEBUG").unwrap_or_default() != "");
 
 #[derive(Default, Debug)]
 pub(crate) struct Udt {

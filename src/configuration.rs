@@ -38,10 +38,10 @@ impl Default for UdtConfiguration {
             udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_rcv_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_reuse_port: false,
-            linger_timeout: Some(180),
+            linger_timeout: Some(10),
             reuse_mux: true,
             rendezvous: false,
-            accept_queue_size: 100,
+            accept_queue_size: 1000,
         }
     }
 }

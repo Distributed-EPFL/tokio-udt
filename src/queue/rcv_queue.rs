@@ -1,7 +1,7 @@
 use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
-use crate::socket::{SocketId, UdtSocket, UdtStatus};
-use crate::udt::{SocketRef, Udt};
+use crate::socket::{SocketId, UdtSocket};
+use crate::udt::{SocketRef, Udt, UDT_DEBUG};
 use nix::sys::socket::{
     recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrIn, SockaddrIn6, SockaddrLike,
     SockaddrStorage,
@@ -46,12 +46,10 @@ impl UdtRcvQueue {
             .push_back((Instant::now(), socket_id));
     }
 
-    pub fn update(&self, socket_id: SocketId) {
-        self.sockets
-            .lock()
-            .unwrap()
-            .retain(|(_, id)| socket_id != *id);
-        self.push_back(socket_id);
+    fn update(&self, socket_id: SocketId) {
+        let mut queue = self.sockets.lock().unwrap();
+        queue.retain(|(_, id)| socket_id != *id);
+        queue.push_back((Instant::now(), socket_id));
     }
 
     pub fn set_multiplexer(&self, mux: &Arc<UdtMultiplexer>) {
@@ -169,38 +167,42 @@ impl UdtRcvQueue {
                     // }
 
                     if let Some(socket) = self.get_socket(socket_id).await {
-                        if socket.peer_addr() == Some(addr)
-                            && ![UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing]
-                                .contains(&socket.status())
-                        {
+                        if socket.peer_addr() == Some(addr) && socket.status().is_alive() {
                             socket.process_packet(packet).await?;
                             socket.check_timers().await;
                             self.update(socket_id);
-                        } else {
+                        } else if *UDT_DEBUG {
                             eprintln!("Ignoring packet {:?}", packet);
                         }
                     } else {
-                        eprintln!("socket not found for socket_id {}", socket_id);
                         // TODO: implement rendezvous queue
+
+                        if *UDT_DEBUG {
+                            eprintln!("socket not found for socket_id {}", socket_id);
+                            dbg!(packet);
+                        }
                     }
                 }
             }
 
-            let to_check: Vec<_> = self
-                .sockets
-                .lock()
-                .unwrap()
-                .iter()
-                .take_while(|(ts, _)| ts.elapsed() > TIMERS_CHECK_INTERVAL)
-                .map(|(_, socket_id)| *socket_id)
-                .collect();
+            let to_check = {
+                let mut to_check = vec![];
+                let mut sockets = self.sockets.lock().unwrap();
+                while sockets
+                    .front()
+                    .map(|(ts, _)| ts.elapsed() > TIMERS_CHECK_INTERVAL)
+                    .unwrap_or(false)
+                {
+                    to_check.push(sockets.pop_front().unwrap().1);
+                }
+                to_check
+            };
 
             for socket_id in to_check {
                 if let Some(socket) = self.get_socket(socket_id).await {
-                    let status = socket.status();
-                    if ![UdtStatus::Broken, UdtStatus::Closing, UdtStatus::Closed].contains(&status)
-                    {
+                    if socket.status().is_alive() {
                         socket.check_timers().await;
+                        self.update(socket_id);
                     }
                 }
             }

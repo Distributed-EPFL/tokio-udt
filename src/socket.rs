@@ -238,7 +238,7 @@ impl UdtSocket {
     // }
 
     pub(crate) async fn next_data_packets(&self) -> Result<Option<(Vec<UdtDataPacket>, Instant)>> {
-        if [UdtStatus::Broken, UdtStatus::Closed, UdtStatus::Closing].contains(&self.status()) {
+        if !self.status().is_alive() {
             eprintln!(
                 "No data to send: socket {} has status {:?}",
                 self.socket_id,
@@ -388,8 +388,7 @@ impl UdtSocket {
         addr: SocketAddr,
         hs: &HandShakeInfo,
     ) -> Result<()> {
-        let status = self.status();
-        if status == UdtStatus::Closing || status == UdtStatus::Closed {
+        if !self.status().is_alive() {
             return Err(Error::new(ErrorKind::ConnectionRefused, "socket closed"));
         }
 
@@ -1025,7 +1024,7 @@ impl UdtSocket {
             ));
         }
         let status = self.status();
-        if status == UdtStatus::Broken || status == UdtStatus::Closing {
+        if !status.is_alive() {
             if !self.rcv_buffer().has_data_to_read() {
                 return Err(Error::new(
                     ErrorKind::BrokenPipe,
@@ -1046,7 +1045,7 @@ impl UdtSocket {
         self.wait_for_data_to_read().await;
 
         let status = self.status();
-        if status == UdtStatus::Broken || status == UdtStatus::Closing {
+        if !status.is_alive() {
             if !self.rcv_buffer().has_data_to_read() {
                 return Err(Error::new(
                     ErrorKind::BrokenPipe,
@@ -1075,10 +1074,7 @@ impl UdtSocket {
             )));
         }
         let status = self.status();
-        if status == UdtStatus::Broken
-            || status == UdtStatus::Closing
-            || status == UdtStatus::Closed
-        {
+        if !status.is_alive() {
             if !self.rcv_buffer().has_data_to_read() {
                 return Poll::Ready(Err(Error::new(
                     ErrorKind::BrokenPipe,
@@ -1103,7 +1099,11 @@ impl UdtSocket {
         Poll::Ready(Ok(written))
     }
 
-    pub(crate) async fn connect(&self, addr: SocketAddr) -> Result<()> {
+    pub(crate) async fn connect(
+        &self,
+        addr: SocketAddr,
+        bind_addr: Option<SocketAddr>,
+    ) -> Result<()> {
         if self.status() != UdtStatus::Init {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -1114,7 +1114,7 @@ impl UdtSocket {
         self.open();
         {
             let mut udt = Udt::get().write().await;
-            udt.update_mux(self, None).await?;
+            udt.update_mux(self, bind_addr).await?;
         }
 
         *self.status.lock().unwrap() = UdtStatus::Connecting;
@@ -1207,11 +1207,16 @@ impl UdtSocket {
 
     pub(crate) async fn wait_for_data_to_read(&self) {
         if let Some(notified) = {
-            let rcv_buffer = self.rcv_buffer();
-            if rcv_buffer.has_data_to_read() {
+            let status = self.status.lock().unwrap();
+            if !status.is_alive() {
                 None
             } else {
-                Some(self.rcv_notify.notified())
+                let rcv_buffer = self.rcv_buffer();
+                if rcv_buffer.has_data_to_read() {
+                    None
+                } else {
+                    Some(self.rcv_notify.notified())
+                }
             }
         } {
             notified.await
@@ -1276,4 +1281,10 @@ pub enum UdtStatus {
     Broken,
     Closing,
     Closed,
+}
+
+impl UdtStatus {
+    pub(crate) fn is_alive(&self) -> bool {
+        *self != UdtStatus::Broken && *self != UdtStatus::Closing && *self != UdtStatus::Closed
+    }
 }

@@ -4,7 +4,7 @@ use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, Error, ErrorKind, ReadBuf, Result};
+use tokio::io::{AsyncRead, AsyncWrite, ErrorKind, ReadBuf, Result};
 
 pub struct UdtConnection {
     socket: SocketRef,
@@ -16,21 +16,31 @@ impl UdtConnection {
     }
 
     pub async fn connect(addr: SocketAddr, config: Option<UdtConfiguration>) -> Result<Self> {
+        Self::_bind_and_connect(None, addr, config).await
+    }
+
+    pub async fn bind_and_connect(
+        bind_addr: SocketAddr,
+        connect_addr: SocketAddr,
+        config: Option<UdtConfiguration>,
+    ) -> Result<Self> {
+        Self::_bind_and_connect(Some(bind_addr), connect_addr, config).await
+    }
+
+    async fn _bind_and_connect(
+        bind_addr: Option<SocketAddr>,
+        addr: SocketAddr,
+        config: Option<UdtConfiguration>,
+    ) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
             udt.new_socket(SocketType::Stream, config)?.clone()
         };
-        socket.connect(addr).await?;
+        socket.connect(addr, bind_addr).await?;
         loop {
             let status = socket.wait_for_connection().await;
-            if status == UdtStatus::Connected {
-                break;
-            }
             if status != UdtStatus::Connecting {
-                return Err(Error::new(
-                    ErrorKind::BrokenPipe,
-                    format!("socket status is {:?}", status),
-                ));
+                break;
             }
         }
         Ok(Self::new(socket))
@@ -53,6 +63,10 @@ impl UdtConnection {
 
     pub async fn close(&self) {
         self.socket.close().await
+    }
+
+    pub fn socket_id(&self) -> u32 {
+        self.socket.socket_id
     }
 }
 

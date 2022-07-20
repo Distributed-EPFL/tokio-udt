@@ -95,4 +95,8 @@ impl UdtListener {
     pub fn local_addr(&self) -> Result<SocketAddr> {
         self.socket.multiplexer().unwrap().channel.local_addr()
     }
+
+    pub fn socket_id(&self) -> u32 {
+        self.socket.socket_id
+    }
 }
