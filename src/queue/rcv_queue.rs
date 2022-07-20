@@ -209,7 +209,7 @@ impl UdtRcvQueue {
         }
     }
 
-    // TEMP: waiting for "nix" next release (> 0.24.1) to include these conversions
+    // TEMP: waiting for "nix" next release (> 0.24.2) to include these conversions
     fn addr_v4_from_sockaddrin(addr: SockaddrIn) -> std::net::SocketAddrV4 {
         std::net::SocketAddrV4::new(std::net::Ipv4Addr::from(addr.ip()), addr.port())
     }
