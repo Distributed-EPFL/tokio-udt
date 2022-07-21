@@ -4,7 +4,8 @@ use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ErrorKind, ReadBuf, Result};
+use tokio::io::{AsyncRead, AsyncWrite, Error, ErrorKind, ReadBuf, Result};
+use tokio::net::{ToSocketAddrs, lookup_host};
 
 pub struct UdtConnection {
     socket: SocketRef,
@@ -15,13 +16,13 @@ impl UdtConnection {
         Self { socket }
     }
 
-    pub async fn connect(addr: SocketAddr, config: Option<UdtConfiguration>) -> Result<Self> {
+    pub async fn connect(addr: impl ToSocketAddrs, config: Option<UdtConfiguration>) -> Result<Self> {
         Self::_bind_and_connect(None, addr, config).await
     }
 
     pub async fn bind_and_connect(
         bind_addr: SocketAddr,
-        connect_addr: SocketAddr,
+        connect_addr: impl ToSocketAddrs,
         config: Option<UdtConfiguration>,
     ) -> Result<Self> {
         Self::_bind_and_connect(Some(bind_addr), connect_addr, config).await
@@ -29,14 +30,36 @@ impl UdtConnection {
 
     async fn _bind_and_connect(
         bind_addr: Option<SocketAddr>,
-        addr: SocketAddr,
+        addrs: impl ToSocketAddrs,
         config: Option<UdtConfiguration>,
     ) -> Result<Self> {
         let socket = {
             let mut udt = Udt::get().write().await;
             udt.new_socket(SocketType::Stream, config)?.clone()
         };
-        socket.connect(addr, bind_addr).await?;
+
+        let mut last_err = None;
+        let mut connected = false;
+
+        for addr in lookup_host(addrs).await? {
+            match socket.connect(addr, bind_addr).await {
+                Ok(()) => {
+                    connected = true;
+                    break
+                },
+                Err(e) => {
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        if !connected {
+            return Err(last_err.unwrap_or_else(|| Error::new(
+                ErrorKind::InvalidInput,
+                "could not resolve address"
+            )));
+        }
+
         loop {
             let status = socket.wait_for_connection().await;
             if status != UdtStatus::Connecting {
