@@ -2,7 +2,7 @@ use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
 use crate::queue::{UdtRcvQueue, UdtSndQueue};
 use crate::udt::SocketRef;
-use nix::sys::socket::{sendmmsg, MsgFlags, SendMmsgData, SockaddrStorage};
+use nix::sys::socket::{sendmmsg, MsgFlags, MultHdrs, SockaddrStorage};
 use socket2::{Domain, Socket, Type};
 use std::io::IoSlice;
 use std::io::Result;
@@ -114,29 +114,31 @@ impl UdtMultiplexer {
     ) -> Result<usize> {
         let data: Vec<_> = packets.map(|p| p.serialize()).collect();
         let dest: SockaddrStorage = (*addr).into();
-        let buffers: Vec<SendMmsgData<_, _, _>> = data
-            .iter()
-            .map(|packet| SendMmsgData {
-                iov: [IoSlice::new(packet)],
-                cmsgs: &[],
-                addr: Some(dest),
-                _lt: Default::default(),
-            })
-            .collect();
+        let dests: Vec<_> = std::iter::repeat(Some(dest)).take(data.len()).collect();
+        let slices: Vec<_> = data.iter().map(|packet| [IoSlice::new(packet)]).collect();
+
         self.channel.writable().await?;
         let sent = self
             .channel
             .try_io(Interest::WRITABLE, || {
                 let sock_fd = self.channel.as_raw_fd();
-                let sent: usize = sendmmsg(sock_fd, &buffers, MsgFlags::MSG_DONTWAIT)
-                    .map_err(|err| {
-                        if err == nix::errno::Errno::EWOULDBLOCK {
-                            return Error::new(ErrorKind::WouldBlock, "sendmmsg would block");
-                        }
-                        Error::new(ErrorKind::Other, err)
-                    })?
-                    .into_iter()
-                    .sum();
+                let mut headers = MultHdrs::preallocate(data.len(), None);
+                let sent: usize = sendmmsg(
+                    sock_fd,
+                    &mut headers,
+                    &slices,
+                    &dests,
+                    &[],
+                    MsgFlags::MSG_DONTWAIT,
+                )
+                .map_err(|err| {
+                    if err == nix::errno::Errno::EWOULDBLOCK {
+                        return Error::new(ErrorKind::WouldBlock, "sendmmsg would block");
+                    }
+                    Error::new(ErrorKind::Other, err)
+                })?
+                .map(|result| result.bytes)
+                .sum();
                 Ok(sent)
             })
             .unwrap_or(0);

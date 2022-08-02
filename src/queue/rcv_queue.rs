@@ -3,7 +3,7 @@ use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtSocket};
 use crate::udt::{SocketRef, Udt, UDT_DEBUG};
 use nix::sys::socket::{
-    recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrIn, SockaddrIn6, SockaddrLike,
+    recvmmsg, AddressFamily, MsgFlags, MultHdrs, SockaddrIn, SockaddrIn6, SockaddrLike,
     SockaddrStorage,
 };
 use std::collections::{BTreeMap, VecDeque};
@@ -76,21 +76,17 @@ impl UdtRcvQueue {
 
         loop {
             let packets = {
-                let bufs = buf.chunks_exact_mut(self.mss as usize);
-
-                let mut recv_mesg_data: Vec<RecvMmsgData<_>> = bufs
-                    .map(|b| RecvMmsgData {
-                        iov: [IoSliceMut::new(&mut b[..])],
-                        cmsg_buffer: None,
-                    })
-                    .collect();
-
                 let msgs: Vec<_> = self
                     .channel
                     .try_io(Interest::READABLE, || {
+                        let bufs = buf.chunks_exact_mut(self.mss as usize);
+                        let slices: Vec<_> = bufs.map(|b| [IoSliceMut::new(&mut b[..])]).collect();
+                        let mut headers = MultHdrs::<SockaddrStorage>::preallocate(1000, None);
+
                         let msgs = recvmmsg(
                             self.channel.as_raw_fd(),
-                            &mut recv_mesg_data,
+                            &mut headers,
+                            &slices,
                             MsgFlags::MSG_DONTWAIT,
                             None,
                         )
@@ -100,22 +96,10 @@ impl UdtRcvQueue {
                             }
                             Error::new(ErrorKind::Other, err)
                         })?
-                        .iter()
-                        .map(|msg| {
-                            let addr: SockaddrStorage = msg.address.unwrap();
-                            (msg.bytes, addr)
-                        })
-                        .collect();
-                        Ok(msgs)
-                    })
-                    .unwrap_or_default();
-
-                if !msgs.is_empty() {
-                    let packets: Vec<_> = msgs
-                        .into_iter()
-                        .zip(buf.chunks_exact_mut(self.mss as usize))
-                        .filter_map(|((nbytes, addr), buf)| {
-                            let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
+                        .zip(&slices)
+                        .filter_map(|(msg, buf)| {
+                            let packet = UdtPacket::deserialize(&buf[0][..msg.bytes]).ok()?;
+                            let addr = msg.address.expect("source addr unavailable");
                             let addr: SocketAddr = match addr.family() {
                                 Some(AddressFamily::Inet) => {
                                     Self::addr_v4_from_sockaddrin(*addr.as_sockaddr_in().unwrap())
@@ -130,7 +114,12 @@ impl UdtRcvQueue {
                             Some((packet, addr))
                         })
                         .collect();
-                    Some(packets)
+                        Ok(msgs)
+                    })
+                    .unwrap_or_default();
+
+                if !msgs.is_empty() {
+                    Some(msgs)
                 } else {
                     tokio::select! {
                         _ = sleep(UDP_RCV_TIMEOUT) => (),
