@@ -191,7 +191,7 @@ impl RateControl {
             };
         } else {
             self.dec_count += 1;
-            if self.dec_random <= 5 {
+            if self.dec_count <= 5 {
                 self.nak_count += 1;
                 if self.nak_count % self.dec_random == 0 {
                     self.pkt_send_period = self.pkt_send_period.mul_f64(1.125);
