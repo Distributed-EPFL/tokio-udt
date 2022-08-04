@@ -24,7 +24,6 @@ use tokio::time::{Duration, Instant};
 
 pub(crate) const SYN_INTERVAL: Duration = Duration::from_millis(10);
 const MIN_EXP_INTERVAL: Duration = Duration::from_millis(300);
-const ACK_INTERVAL: Duration = SYN_INTERVAL;
 const PACKETS_BETWEEN_LIGHT_ACK: usize = 64;
 
 static SALT: Lazy<String> = Lazy::new(|| {
@@ -903,11 +902,7 @@ impl UdtSocket {
             });
             let ack_period = self.rate_control.read().unwrap().get_ack_period();
             let mut state = self.state();
-            if !ack_period.is_zero() {
-                state.next_ack_time = now + ack_period;
-            } else {
-                state.next_ack_time = now + ACK_INTERVAL;
-            }
+            state.next_ack_time = now + ack_period;
             state.pkt_count = 0;
             state.light_ack_counter = 0;
         } else {

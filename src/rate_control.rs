@@ -55,7 +55,7 @@ impl RateControl {
             dec_random: 1,
             dec_count: 0,
 
-            ack_period: Duration::ZERO,
+            ack_period: SYN_INTERVAL,
             ack_pkt_interval: 0,
         }
     }
@@ -89,7 +89,7 @@ impl RateControl {
     }
 
     pub fn get_ack_period(&self) -> Duration {
-        self.ack_period
+        std::cmp::min(SYN_INTERVAL, self.ack_period)
     }
 
     pub fn set_rtt(&mut self, rtt: Duration) {
