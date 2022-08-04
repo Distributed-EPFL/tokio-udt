@@ -72,7 +72,8 @@ impl UdtRcvQueue {
     }
 
     pub(crate) async fn worker(&self) -> Result<()> {
-        let mut buf = vec![0_u8; self.mss as usize * 100];
+        const BATCH_SIZE: usize = 100;
+        let mut buf = vec![0_u8; self.mss as usize * BATCH_SIZE];
 
         loop {
             let packets = {
@@ -81,7 +82,7 @@ impl UdtRcvQueue {
                     .try_io(Interest::READABLE, || {
                         let bufs = buf.chunks_exact_mut(self.mss as usize);
                         let slices: Vec<_> = bufs.map(|b| [IoSliceMut::new(&mut b[..])]).collect();
-                        let mut headers = MultHdrs::<SockaddrStorage>::preallocate(1000, None);
+                        let mut headers = MultHdrs::<SockaddrStorage>::preallocate(BATCH_SIZE, None);
 
                         let msgs = recvmmsg(
                             self.channel.as_raw_fd(),
