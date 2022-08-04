@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, Error, ErrorKind, ReadBuf, Result};
-use tokio::net::{ToSocketAddrs, lookup_host};
+use tokio::net::{lookup_host, ToSocketAddrs};
 
 pub struct UdtConnection {
     socket: SocketRef,
@@ -16,7 +16,10 @@ impl UdtConnection {
         Self { socket }
     }
 
-    pub async fn connect(addr: impl ToSocketAddrs, config: Option<UdtConfiguration>) -> Result<Self> {
+    pub async fn connect(
+        addr: impl ToSocketAddrs,
+        config: Option<UdtConfiguration>,
+    ) -> Result<Self> {
         Self::_bind_and_connect(None, addr, config).await
     }
 
@@ -45,8 +48,8 @@ impl UdtConnection {
             match socket.connect(addr, bind_addr).await {
                 Ok(()) => {
                     connected = true;
-                    break
-                },
+                    break;
+                }
                 Err(e) => {
                     last_err = Some(e);
                 }
@@ -54,10 +57,9 @@ impl UdtConnection {
         }
 
         if !connected {
-            return Err(last_err.unwrap_or_else(|| Error::new(
-                ErrorKind::InvalidInput,
-                "could not resolve address"
-            )));
+            return Err(last_err.unwrap_or_else(|| {
+                Error::new(ErrorKind::InvalidInput, "could not resolve address")
+            }));
         }
 
         loop {
