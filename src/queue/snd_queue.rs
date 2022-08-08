@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex, Weak};
 use tokio::io::Result;
 use tokio::sync::Notify;
 use tokio::time::Instant;
-use tokio_timerfd::Delay;
 
 const TOKIO_CHANNEL_CAPACITY: usize = 50;
 
@@ -101,7 +100,7 @@ impl UdtSndQueue {
                 }
                 Err(Some(ts)) => {
                     tokio::select! {
-                        _ = Delay::new(ts.into_std())? => {}
+                        _ = Self::sleep_until(ts) => {}
                         _ = self.notify.notified() => {}
                     }
                 }
@@ -157,5 +156,18 @@ impl UdtSndQueue {
             .filter(|n| n.socket_id != socket_id)
             .cloned()
             .collect();
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn sleep_until(instant: tokio::time::Instant) {
+        tokio_timerfd::Delay::new(instant.into_std())
+            .expect("failed to init delay")
+            .await
+            .expect("timerfd failed")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    async fn sleep_until(instant: tokio::time::Instant) {
+        tokio::time::sleep_until(instant).await
     }
 }

@@ -9,6 +9,10 @@ use std::sync::{Arc, Mutex, Weak};
 use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
 use tokio::time::{Duration, Instant};
+
+#[cfg(not(target_os = "linux"))]
+use tokio::time::sleep;
+#[cfg(target_os = "linux")]
 use tokio_timerfd::sleep;
 
 const TIMERS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
