@@ -2,14 +2,10 @@ use super::configuration::UdtConfiguration;
 use super::packet::UdtPacket;
 use crate::queue::{UdtRcvQueue, UdtSndQueue};
 use crate::udt::SocketRef;
-use nix::sys::socket::{sendmmsg, MsgFlags, SendMmsgData, SockaddrStorage};
 use socket2::{Domain, Socket, Type};
-use std::io::IoSlice;
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use tokio::io::{Error, ErrorKind, Interest};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
@@ -107,11 +103,16 @@ impl UdtMultiplexer {
         self.channel.send_to(&packet.serialize(), addr).await
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) async fn send_mmsg_to(
         &self,
         addr: &SocketAddr,
         packets: impl Iterator<Item = UdtPacket>,
     ) -> Result<usize> {
+        use nix::sys::socket::{sendmmsg, MsgFlags, SendMmsgData, SockaddrStorage};
+        use std::io::IoSlice;
+        use std::os::unix::io::AsRawFd;
+        use tokio::io::{Error, ErrorKind, Interest};
         let data: Vec<_> = packets.map(|p| p.serialize()).collect();
         let dest: SockaddrStorage = (*addr).into();
         let buffers: Vec<SendMmsgData<_, _, _>> = data
@@ -140,6 +141,20 @@ impl UdtMultiplexer {
                 Ok(sent)
             })
             .unwrap_or(0);
+        Ok(sent)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) async fn send_mmsg_to(
+        &self,
+        addr: &SocketAddr,
+        packets: impl Iterator<Item = UdtPacket>,
+    ) -> Result<usize> {
+        self.channel.writable().await?;
+        let mut sent = 0;
+        for data in packets.map(|p| p.serialize()) {
+            sent += self.channel.send_to(&data, addr).await?;
+        }
         Ok(sent)
     }
 

@@ -10,7 +10,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_timerfd::sleep;
+use tokio::time::sleep;
 
 pub(crate) type SocketRef = Arc<UdtSocket>;
 
@@ -262,7 +262,7 @@ impl Udt {
             let udt = Self::get();
             loop {
                 udt.write().await.remove_broken_sockets().await;
-                sleep(std::time::Duration::from_secs(1)).await.unwrap();
+                sleep(std::time::Duration::from_secs(1)).await;
             }
         });
     }

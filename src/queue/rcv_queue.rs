@@ -2,16 +2,11 @@ use crate::multiplexer::UdtMultiplexer;
 use crate::packet::UdtPacket;
 use crate::socket::{SocketId, UdtSocket};
 use crate::udt::{SocketRef, Udt, UDT_DEBUG};
-use nix::sys::socket::{
-    recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrIn, SockaddrIn6, SockaddrLike,
-    SockaddrStorage,
-};
+use nix::sys::socket::{SockaddrIn, SockaddrIn6};
 use std::collections::{BTreeMap, VecDeque};
-use std::io::IoSliceMut;
 use std::net::SocketAddr;
-use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex, Weak};
-use tokio::io::{Error, ErrorKind, Interest, Result};
+use tokio::io::{Error, ErrorKind, Result};
 use tokio::net::UdpSocket;
 use tokio::time::{Duration, Instant};
 use tokio_timerfd::sleep;
@@ -71,62 +66,82 @@ impl UdtRcvQueue {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn receive_packets(&self, buf: &mut [u8]) -> Result<Vec<(usize, SocketAddr)>> {
+        use nix::sys::socket::{
+            recvmmsg, AddressFamily, MsgFlags, RecvMmsgData, SockaddrLike, SockaddrStorage,
+        };
+        use std::io::IoSliceMut;
+        use std::os::unix::io::AsRawFd;
+        use tokio::io::Interest;
+        let bufs = buf.chunks_exact_mut(self.mss as usize);
+        let mut recv_mesg_data: Vec<RecvMmsgData<_>> = bufs
+            .map(|b| RecvMmsgData {
+                iov: [IoSliceMut::new(&mut b[..])],
+                cmsg_buffer: None,
+            })
+            .collect();
+
+        self.channel.try_io(Interest::READABLE, || {
+            let msgs = recvmmsg(
+                self.channel.as_raw_fd(),
+                &mut recv_mesg_data,
+                MsgFlags::MSG_DONTWAIT,
+                None,
+            )
+            .map_err(|err| {
+                if err == nix::errno::Errno::EWOULDBLOCK {
+                    return Error::new(ErrorKind::WouldBlock, "recvmmsg would block");
+                }
+                Error::new(ErrorKind::Other, err)
+            })?
+            .iter()
+            .map(|msg| {
+                let addr: SockaddrStorage = msg.address.unwrap();
+                let socket_addr: SocketAddr = match addr.family() {
+                    Some(AddressFamily::Inet) => {
+                        Self::addr_v4_from_sockaddrin(*addr.as_sockaddr_in().unwrap()).into()
+                    }
+                    Some(AddressFamily::Inet6) => {
+                        Self::addr_v6_from_sockaddrin6(*addr.as_sockaddr_in6().unwrap()).into()
+                    }
+                    _ => unreachable!(),
+                };
+                (msg.bytes, socket_addr)
+            })
+            .collect();
+            Ok(msgs)
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn receive_packets(&self, buf: &mut [u8]) -> Result<Vec<(usize, SocketAddr)>> {
+        let bufs = buf.chunks_exact_mut(self.mss as usize);
+        let mut msgs = vec![];
+        for mut buf in bufs {
+            match self.channel.try_recv_from(&mut buf) {
+                Ok(msg) => {
+                    msgs.push(msg);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(msgs)
+    }
+
     pub(crate) async fn worker(&self) -> Result<()> {
         let mut buf = vec![0_u8; self.mss as usize * 100];
-
         loop {
             let packets = {
-                let bufs = buf.chunks_exact_mut(self.mss as usize);
-
-                let mut recv_mesg_data: Vec<RecvMmsgData<_>> = bufs
-                    .map(|b| RecvMmsgData {
-                        iov: [IoSliceMut::new(&mut b[..])],
-                        cmsg_buffer: None,
-                    })
-                    .collect();
-
-                let msgs: Vec<_> = self
-                    .channel
-                    .try_io(Interest::READABLE, || {
-                        let msgs = recvmmsg(
-                            self.channel.as_raw_fd(),
-                            &mut recv_mesg_data,
-                            MsgFlags::MSG_DONTWAIT,
-                            None,
-                        )
-                        .map_err(|err| {
-                            if err == nix::errno::Errno::EWOULDBLOCK {
-                                return Error::new(ErrorKind::WouldBlock, "recvmmsg would block");
-                            }
-                            Error::new(ErrorKind::Other, err)
-                        })?
-                        .iter()
-                        .map(|msg| {
-                            let addr: SockaddrStorage = msg.address.unwrap();
-                            (msg.bytes, addr)
-                        })
-                        .collect();
-                        Ok(msgs)
-                    })
-                    .unwrap_or_default();
-
+                let msgs = self.receive_packets(&mut buf).unwrap_or_default();
                 if !msgs.is_empty() {
                     let packets: Vec<_> = msgs
                         .into_iter()
                         .zip(buf.chunks_exact_mut(self.mss as usize))
                         .filter_map(|((nbytes, addr), buf)| {
                             let packet = UdtPacket::deserialize(&buf[..nbytes]).ok()?;
-                            let addr: SocketAddr = match addr.family() {
-                                Some(AddressFamily::Inet) => {
-                                    Self::addr_v4_from_sockaddrin(*addr.as_sockaddr_in().unwrap())
-                                        .into()
-                                }
-                                Some(AddressFamily::Inet6) => {
-                                    Self::addr_v6_from_sockaddrin6(*addr.as_sockaddr_in6().unwrap())
-                                        .into()
-                                }
-                                _ => unreachable!(),
-                            };
+
                             Some((packet, addr))
                         })
                         .collect();
