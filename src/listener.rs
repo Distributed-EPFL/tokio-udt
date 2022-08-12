@@ -5,6 +5,7 @@ use crate::udt::{SocketRef, Udt};
 use std::net::SocketAddr;
 use tokio::io::{Error, ErrorKind, Result};
 
+/// An object representing a UDT socket listening for incoming connections
 pub struct UdtListener {
     socket: SocketRef,
 }
