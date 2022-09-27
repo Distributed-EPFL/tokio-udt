@@ -1,19 +1,30 @@
-/*!
-An implementation of UDP-based Data Transfer Protocol (UDT) based on Tokio primitives.
+# tokio-udt
 
-UDT is a high performance data transport protocol. It was designed for data intensive
+ An implementation of UDP-based Data Transfer Protocol (UDT) based on Tokio primitives.
+
+[![Crates.io][crates-badge]][crates-url]
+[![Docs][docs-badge]][docs-url]
+
+[crates-badge]: https://img.shields.io/crates/v/tokio-udt.svg
+[crates-url]: https://crates.io/crates/tokio-udt
+[docs-badge]: https://img.shields.io/docsrs/tokio-udt.svg
+[docs-url]: https://docs.rs/tokio-udt/
+
+## What is UDT?
+
+UDT is a high performance data transport protocol. It was designed specifically for data intensive
 applications over high speed wide area networks, to overcome the efficiency and fairness
 problems of TCP. As its names indicates, UDT is built on top of UDP and it provides both
 reliable data streaming and messaging services.
 
+To learn more about UDT, see https://udt.sourceforge.io/
 
-# Usage
 
-## UDT server example
+## Examples
 
-Bind a port with [`UdtListener`]:
+### UDT listener
 
-```no_run
+```rust,no_run
 use std::net::Ipv4Addr;
 use tokio::io::{AsyncReadExt, Result};
 use tokio_udt::UdtListener;
@@ -46,11 +57,9 @@ async fn main() -> Result<()> {
 }
 ```
 
-## UDT client example
+### UDT client
 
-Open a connection with [`UdtConnection`]
-
-```no_run
+```rust,no_run
 use std::net::Ipv4Addr;
 use tokio::io::{AsyncWriteExt, Result};
 use tokio_udt::UdtConnection;
@@ -64,30 +73,3 @@ async fn main() -> Result<()> {
     }
 }
 ```
-*/
-mod ack_window;
-mod common;
-mod configuration;
-mod connection;
-mod control_packet;
-mod data_packet;
-mod flow;
-mod listener;
-mod loss_list;
-mod multiplexer;
-mod packet;
-mod queue;
-mod rate_control;
-mod seq_number;
-mod socket;
-mod state;
-mod udt;
-
-pub use configuration::UdtConfiguration;
-pub use connection::UdtConnection;
-pub use listener::UdtListener;
-pub use rate_control::RateControl;
-pub use seq_number::SeqNumber;
-
-#[cfg(doctest)]
-doc_comment::doctest!("../README.md");
