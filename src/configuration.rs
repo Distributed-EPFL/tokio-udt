@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 const DEFAULT_MSS: u32 = 1500;
 const DEFAULT_UDT_BUF_SIZE: u32 = 81920;
 const DEFAULT_UDP_BUF_SIZE: usize = 8_000_000;
@@ -39,10 +41,10 @@ pub struct UdtConfiguration {
     pub reuse_mux: bool,
     /// UDT rendez-vous mode. (NOT IMPLEMENTED)
     pub rendezvous: bool,
-    /// Maximum number of pending UDT connections to accept.
+    /// Maximum number of pending UDT connections to accept. Default: 1000
     pub accept_queue_size: usize,
-    /// Linger time on close()
-    pub linger_timeout: Option<u32>,
+    /// Linger time on close(). Default: 10 seconds
+    pub linger_timeout: Option<Duration>,
 }
 
 impl UdtConfiguration {
@@ -61,7 +63,7 @@ impl Default for UdtConfiguration {
             udp_snd_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_rcv_buf_size: DEFAULT_UDP_BUF_SIZE,
             udp_reuse_port: false,
-            linger_timeout: Some(10),
+            linger_timeout: Some(Duration::from_secs(10)),
             reuse_mux: true,
             rendezvous: false,
             accept_queue_size: 1000,

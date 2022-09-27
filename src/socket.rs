@@ -1154,14 +1154,12 @@ impl UdtSocket {
             return;
         }
         let now = Instant::now();
-        let linger_timeout = Duration::from_secs(
-            self.configuration
-                .read()
-                .unwrap()
-                .linger_timeout
-                .unwrap_or(0)
-                .into(),
-        );
+        let linger_timeout = self
+            .configuration
+            .read()
+            .unwrap()
+            .linger_timeout
+            .unwrap_or(Duration::ZERO);
 
         while self.status() == UdtStatus::Connected
             && !self.snd_buffer_is_empty()
