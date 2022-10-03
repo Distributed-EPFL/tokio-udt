@@ -9,6 +9,8 @@ pub trait SeqConstants: Clone {
     }
 }
 
+/// A sequence number, with a valid values in `[0, T::MAX_NUMBER]`
+/// that implements cyclic arithmetic
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct GenericSeqNumber<T>
 where
@@ -83,20 +85,26 @@ impl<T: SeqConstants> std::ops::Sub<i32> for GenericSeqNumber<T> {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy)]
 pub struct SeqNumberConstants;
 impl SeqConstants for SeqNumberConstants {
-    const MAX_NUMBER: u32 = 0x7fffffff;
+    const MAX_NUMBER: u32 = 0x7fff_ffff;
 }
+
+/// Packet Sequence Number (on 31 bits)
 pub type SeqNumber = GenericSeqNumber<SeqNumberConstants>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy)]
 pub struct AckSeqNumberConstants;
 impl SeqConstants for AckSeqNumberConstants {
-    const MAX_NUMBER: u32 = 0x7fffffff;
+    const MAX_NUMBER: u32 = 0x7fff_ffff;
 }
+
+/// ACK sequence number (on 31 bits)
 pub type AckSeqNumber = GenericSeqNumber<AckSeqNumberConstants>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy)]
 pub struct MsgNumberConstants;
 impl SeqConstants for MsgNumberConstants {
-    const MAX_NUMBER: u32 = 0x1fffffff;
+    const MAX_NUMBER: u32 = 0x1fff_ffff;
 }
+
+/// Message Number (on 29 bits)
 pub type MsgNumber = GenericSeqNumber<MsgNumberConstants>;

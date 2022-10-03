@@ -5,7 +5,7 @@ use tokio::io::ReadBuf;
 
 #[derive(Debug)]
 pub(crate) struct RcvBuffer {
-    packets: BTreeMap<SeqNumber, UdtDataPacket>, // map: seq_number -> packet
+    packets: BTreeMap<SeqNumber, UdtDataPacket>,
     max_size: u32,
     next_to_read: SeqNumber,
     next_to_ack: SeqNumber,

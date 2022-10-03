@@ -36,7 +36,7 @@ static SALT: Lazy<String> = Lazy::new(|| {
 
 pub type SocketId = u32;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SocketType {
     Stream = 1,
     Datagram = 2,
@@ -1264,7 +1264,7 @@ impl PartialEq for UdtSocket {
 
 impl Eq for UdtSocket {}
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum UdtStatus {
     Init,
     Opened,
