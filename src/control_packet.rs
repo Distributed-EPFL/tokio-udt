@@ -20,7 +20,7 @@ impl UdtControlPacket {
             packet_type: ControlPacketType::Handshake(hs),
             reserved: 0,
             additional_info: 0,
-            timestamp: 0, // TODO set timestamp here ?
+            timestamp: 0,
             dest_socket_id,
         }
     }

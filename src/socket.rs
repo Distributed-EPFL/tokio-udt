@@ -475,9 +475,6 @@ impl UdtSocket {
                     state.last_ack2_received = hs.initial_seq_number;
                     state.curr_rcv_seq_number = hs.initial_seq_number - 1;
                     *self.peer_socket_id.lock().unwrap() = Some(hs.socket_id);
-                    // self.self_ip = Some(hs.ip_address);
-
-                    // TODO: check size of loss lists
 
                     {
                         let mut rate_control = self.rate_control.write().unwrap();
@@ -543,7 +540,7 @@ impl UdtSocket {
 
                             let offset = seq - state.last_data_ack_processed;
                             if offset <= 0 {
-                                // Ignore Repeated acks
+                                // Ignore repeated acks
                                 return Ok(());
                             }
 
@@ -742,7 +739,6 @@ impl UdtSocket {
                 UdtControlPacket::new_nak(loss_list, self.peer_socket_id().unwrap_or(0))
             };
             self.send_packet(nak_packet.into()).await?;
-            // TODO increment NAK stats
         }
 
         if payload_len < self.get_max_payload_size() {
@@ -1062,7 +1058,7 @@ impl UdtSocket {
         let mut buf = ReadBuf::new(buf);
         let written = self.rcv_buffer().read_buffer(&mut buf);
 
-        // TODO: handle UDT timeout
+        // TODO: implement configurable UDT timeout
         Ok(written)
     }
 
@@ -1120,7 +1116,8 @@ impl UdtSocket {
         *self.status.lock().unwrap() = UdtStatus::Connecting;
         self.set_peer_addr(addr);
 
-        // TODO: use rendezvous queue?
+        // TODO: register the current socket in the rendezvous queue
+        // This is used to temporarily store incoming handshakes and possibly retry connections, including for non-rendezvous connections.
 
         let hs_packet = {
             let configuration = self.configuration.read().unwrap();
@@ -1181,7 +1178,7 @@ impl UdtSocket {
             }
         }
 
-        // TODO: remove socket from rendez-vous queue
+        // TODO: remove socket from rendezvous queue
 
         if self.status() == UdtStatus::Connected {
             let shutdown = UdtControlPacket::new_shutdown(self.peer_socket_id().unwrap());
@@ -1194,7 +1191,7 @@ impl UdtSocket {
                 });
         }
 
-        // TODO: keep channel stats in cache
+        // TODO: keep channel stats (RTT, bandwidth, etc.) in a cache for more efficient reconnections.
         *self.status.lock().unwrap() = UdtStatus::Closing;
         self.notify_all();
     }

@@ -179,27 +179,20 @@ impl UdtRcvQueue {
                             "received non-hanshake packet with socket 0",
                         ));
                     }
+                } else if let Some(socket) = self.get_socket(socket_id).await {
+                    if socket.peer_addr() == Some(addr) && socket.status().is_alive() {
+                        socket.process_packet(packet).await?;
+                        socket.check_timers().await;
+                        self.update(socket_id);
+                    } else if *UDT_DEBUG {
+                        eprintln!("Ignoring packet {:?}", packet);
+                    }
                 } else {
-                    // if !self.sockets.contains(&socket_id) {
-                    //     eprintln!("socket {} not present in rcv_queue", socket_id);
-                    //     continue;
-                    // }
+                    // TODO: implement rendezvous queue for rendezvous mode
 
-                    if let Some(socket) = self.get_socket(socket_id).await {
-                        if socket.peer_addr() == Some(addr) && socket.status().is_alive() {
-                            socket.process_packet(packet).await?;
-                            socket.check_timers().await;
-                            self.update(socket_id);
-                        } else if *UDT_DEBUG {
-                            eprintln!("Ignoring packet {:?}", packet);
-                        }
-                    } else {
-                        // TODO: implement rendezvous queue
-
-                        if *UDT_DEBUG {
-                            eprintln!("socket not found for socket_id {}", socket_id);
-                            dbg!(packet);
-                        }
+                    if *UDT_DEBUG {
+                        eprintln!("socket not found for socket_id {}", socket_id);
+                        dbg!(packet);
                     }
                 }
             }

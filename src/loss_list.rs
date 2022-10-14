@@ -14,6 +14,8 @@ impl LossList {
     }
 
     pub fn insert(&mut self, n1: SeqNumber, n2: SeqNumber) {
+        // TODO: limit size of loss list
+
         if n1.number() > n2.number() {
             self.insert(n1, SeqNumber::max());
             self.insert(SeqNumber::zero(), n2);
