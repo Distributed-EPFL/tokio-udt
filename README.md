@@ -19,6 +19,8 @@ reliable data streaming and messaging services.
 
 To learn more about UDT, see https://udt.sourceforge.io/
 
+You can also find the reference C++ implementation on https://github.com/eminence/udt
+
 
 ## Examples
 
