@@ -21,7 +21,6 @@ pub(crate) static UDT_DEBUG: Lazy<bool> =
 #[derive(Default, Debug)]
 pub(crate) struct Udt {
     sockets: BTreeMap<SocketId, SocketRef>,
-    // closed_sockets: BTreeMap<SocketId, SocketRef>,
     multiplexers: BTreeMap<MultiplexerId, Arc<UdtMultiplexer>>,
     next_socket_id: SocketId,
     peers: BTreeMap<(SocketId, SeqNumber), BTreeSet<SocketId>>, // peer socket id -> local socket id
@@ -104,13 +103,15 @@ impl Udt {
         {
             let socket = existing_peer_socket;
             if socket.status() == UdtStatus::Broken {
-                eprintln!("Existing connection to peer {} is broken", peer);
                 // last connection from the "peer" address has been broken
-
-                // *socket.status.lock().unwrap() = UdtStatus::Closed;
-                /*  TODO:
-                    Set timestamp? and remove from queued sockets and accept sockets?
-                */
+                if *UDT_DEBUG {
+                    eprintln!("Existing connection to peer {} is broken", peer);
+                }
+                listener_socket
+                    .queued_sockets
+                    .write()
+                    .await
+                    .remove(&socket.socket_id);
             } else {
                 // Respond with existing socket configuration.
                 let source_socket_id = hs.socket_id;
@@ -223,7 +224,7 @@ impl Udt {
         Ok(())
     }
 
-    async fn remove_broken_sockets(&mut self) {
+    async fn garbage_collect_sockets(&mut self) {
         for (_, sock) in self
             .sockets
             .iter()
@@ -261,7 +262,7 @@ impl Udt {
         tokio::spawn(async {
             let udt = Self::get();
             loop {
-                udt.write().await.remove_broken_sockets().await;
+                udt.write().await.garbage_collect_sockets().await;
                 sleep(std::time::Duration::from_secs(1)).await;
             }
         });

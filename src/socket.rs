@@ -8,7 +8,7 @@ use crate::queue::{RcvBuffer, SndBuffer};
 use crate::rate_control::RateControl;
 use crate::seq_number::SeqNumber;
 use crate::state::SocketState;
-use crate::udt::{SocketRef, Udt};
+use crate::udt::{SocketRef, Udt, UDT_DEBUG};
 use once_cell::sync::Lazy;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -76,7 +76,6 @@ pub struct UdtSocket {
     snd_buffer: Mutex<SndBuffer>,
     flow: RwLock<UdtFlow>,
     pub rate_control: RwLock<RateControl>,
-    // self_ip: Option<IpAddr>,
     start_time: Instant,
 
     state: Mutex<SocketState>,
@@ -114,7 +113,6 @@ impl UdtSocket {
             )),
             flow: RwLock::new(UdtFlow::default()),
             rate_control: RwLock::new(RateControl::new()),
-            // self_ip: None,
             start_time: now,
 
             state: Mutex::new(SocketState::new(initial_seq_number, &configuration)),
@@ -225,24 +223,15 @@ impl UdtSocket {
         self.multiplexer.read().unwrap().upgrade()
     }
 
-    // pub fn set_self_ip(&mut self, ip: IpAddr) {
-    //     self.self_ip = Some(ip);
-    // }
-
-    // pub async fn self_addr(&self) -> Option<SocketAddr> {
-    //     if let Some(mux) = self.multiplexer.lock().unwrap().upgrade() {
-    //         return Some(mux.get_local_addr());
-    //     }
-    //     None
-    // }
-
     pub(crate) async fn next_data_packets(&self) -> Result<Option<(Vec<UdtDataPacket>, Instant)>> {
         if !self.status().is_alive() {
-            eprintln!(
-                "No data to send: socket {} has status {:?}",
-                self.socket_id,
-                self.status()
-            );
+            if *UDT_DEBUG {
+                eprintln!(
+                    "No data to send: socket {} has status {:?}",
+                    self.socket_id,
+                    self.status()
+                );
+            };
             return Ok(None);
         }
         let now = Instant::now();
@@ -267,7 +256,9 @@ impl UdtSocket {
             Some((seq, offset)) => {
                 // Loss retransmission has priority
                 if offset < 0 {
-                    eprintln!("unexpected offset in sender loss list");
+                    if *UDT_DEBUG {
+                        eprintln!("unexpected offset {} in sender loss list", offset);
+                    }
                     return Ok(None);
                 }
                 let to_send = self.snd_buffer.lock().unwrap().read_data(
@@ -536,7 +527,11 @@ impl UdtSocket {
                             let mut state = self.state();
                             if (seq - state.curr_snd_seq_number) > 1 {
                                 // This should not happen
-                                eprintln!("Udt socket broken: seq number is larger than expected");
+                                if *UDT_DEBUG {
+                                    eprintln!(
+                                        "Udt socket broken: seq number is larger than expected"
+                                    );
+                                };
                                 *self.status.lock().unwrap() = UdtStatus::Broken;
                             }
 
@@ -612,7 +607,9 @@ impl UdtSocket {
                 {
                     let mut rate_control = self.rate_control.write().unwrap();
                     if nak.loss_info.is_empty() {
-                        eprintln!("Received NAK with empty list");
+                        if *UDT_DEBUG {
+                            eprintln!("Received NAK with empty list");
+                        }
                         return Ok(());
                     }
                     rate_control.on_loss((nak.loss_info[0] & 0x7fff_ffff).into());
@@ -711,7 +708,9 @@ impl UdtSocket {
             let mut rcv_buffer = self.rcv_buffer();
             let available_buf_size = rcv_buffer.get_available_buf_size();
             if available_buf_size < offset as u32 {
-                eprintln!("not enough space in rcv buffer");
+                if *UDT_DEBUG {
+                    eprintln!("not enough space in rcv buffer");
+                }
                 return Ok(());
             }
 
@@ -898,7 +897,9 @@ impl UdtSocket {
             || (ack_interval > 0 && ack_interval <= self.state().pkt_count)
         {
             self.send_ack(false).await.unwrap_or_else(|err| {
-                eprintln!("failed to send ack: {:?}", err);
+                if *UDT_DEBUG {
+                    eprintln!("failed to send ack: {:?}", err);
+                }
             });
             let ack_period = self.rate_control.read().unwrap().get_ack_period();
             let mut state = self.state();
@@ -912,7 +913,9 @@ impl UdtSocket {
             };
             if send_light_ack {
                 self.send_ack(true).await.unwrap_or_else(|err| {
-                    eprintln!("failed to send ack: {:?}", err);
+                    if *UDT_DEBUG {
+                        eprintln!("failed to send ack: {:?}", err);
+                    }
                 });
                 self.state().light_ack_counter += 1;
             }
@@ -945,7 +948,9 @@ impl UdtSocket {
                     self.send_packet(keep_alive.into())
                         .await
                         .unwrap_or_else(|err| {
-                            eprintln!("failed to send keep alive: {:?}", err);
+                            if *UDT_DEBUG {
+                                eprintln!("failed to send keep alive: {:?}", err);
+                            };
                         });
                 }
             } else {
@@ -1183,7 +1188,9 @@ impl UdtSocket {
             self.send_packet(shutdown.into())
                 .await
                 .unwrap_or_else(|err| {
-                    eprintln!("Failed to send shutdown packet: {}", err);
+                    if *UDT_DEBUG {
+                        eprintln!("Failed to send shutdown packet: {}", err);
+                    }
                 });
         }
 
