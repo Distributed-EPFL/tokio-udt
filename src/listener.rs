@@ -39,7 +39,7 @@ impl UdtListener {
             *mux.listener.write().await = Some(socket_ref);
             *socket.status.lock().unwrap() = UdtStatus::Listening;
 
-            println!("Now listening on {:?}", bind_addr);
+            log::debug!("Now listening on {:?}", bind_addr);
         }
 
         Ok(Self { socket })
